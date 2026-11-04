@@ -1,0 +1,12 @@
+[env]
+# audiopus_sys compila libopus con un CMakeLists.txt que declara
+# cmake_minimum_required < 3.5. CMake 4 lo rechaza salvo que se le indique
+# esta política mínima. Con CMake 3.x no tiene ningún efecto.
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"
+
+[build]
+# Poly1305 "soft": para paquetes pequeños con una clave nueva cada vez (como los
+# de voz), el backend AVX2 de poly1305 gasta mucho preparando cada clave. Medido
+# en paquetes de voz de 100 bytes: cifrar baja de ~2,2 µs a ~0,6 µs. Funciona en
+# cualquier procesador (no exige AVX2). Ojo: la variable RUSTFLAGS sustituye esto.
+rustflags = ["--cfg", "poly1305_force_soft"]

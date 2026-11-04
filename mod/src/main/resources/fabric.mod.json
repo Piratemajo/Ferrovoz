@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "ferrovoz",
+  "version": "${version}",
+  "name": "Ferrovoz",
+  "description": "Proximity voice chat",
+  "authors": [
+    "Piratemajo"
+  ],
+  "license": "MIT",
+  "icon": "assets/ferrovoz/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "dev.ferrovoz.fabric.FerrovozFabric"
+    ],
+    "client": [
+      "dev.ferrovoz.fabric.FerrovozFabricClient"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "~26.3",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}

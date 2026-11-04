@@ -1,0 +1,26 @@
+# Ferrovoz en NeoForge. El mismo jar trae fabric.mod.json (Fabric), META-INF/mods.toml (Forge) y plugin.yml (Paper).
+modLoader="javafml"
+loaderVersion="[1,)"
+license="MIT"
+
+[[mods]]
+modId="ferrovoz"
+version="${version}"
+displayName="Ferrovoz"
+authors="Piratemajo"
+logoFile="assets/ferrovoz/icon.png"
+description='''Proximity voice chat'''
+
+[[dependencies.ferrovoz]]
+    modId="neoforge"
+    type="required"
+    versionRange="[26.3,)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.ferrovoz]]
+    modId="minecraft"
+    type="required"
+    versionRange="[26.3,26.4)"
+    ordering="NONE"
+    side="BOTH"

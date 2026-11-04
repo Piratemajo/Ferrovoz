@@ -1,0 +1,9 @@
+{
+  "id": "ferrovoz",
+  "name": "Ferrovoz",
+  "version": "${version}",
+  "description": "Proximity voice chat",
+  "authors": ["Piratemajo"],
+  "dependencies": [],
+  "main": "dev.ferrovoz.proxy.velocity.FerrovozVelocity"
+}

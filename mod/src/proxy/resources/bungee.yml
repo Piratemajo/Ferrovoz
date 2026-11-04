@@ -1,0 +1,5 @@
+name: Ferrovoz
+main: dev.ferrovoz.proxy.bungee.FerrovozBungee
+version: '${version}'
+author: Piratemajo
+description: Proximity voice chat

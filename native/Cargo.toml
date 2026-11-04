@@ -1,0 +1,42 @@
+[package]
+name = "ferrovoz-native"
+version = "0.10.0"
+edition = "2021"
+description = "Núcleo nativo de Ferrovoz: chat de voz por proximidad para Minecraft (Fabric)"
+license = "MIT"
+
+[lib]
+name = "ferrovoz"
+# cdylib -> la librería que carga Java por JNI; rlib -> para tests y herramientas
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["audio"]
+# Dispositivos de audio con cpal. Sin ella el cliente funciona (red, códec, mezcla)
+# pero no abre dispositivos: tests y servidores.
+audio = ["dep:cpal", "dep:sonora"]
+
+[dependencies]
+jni = "0.21"
+opus = "0.3"
+chacha20poly1305 = "0.10"
+getrandom = "0.2"
+log = "0.4"
+cpal = { version = "0.15", optional = true }
+nnnoiseless = { version = "0.5.2", default-features = false }
+# AEC3 de WebRTC (port en Rust). Solo cliente (feature audio).
+sonora = { version = "0.2", optional = true }
+# Reenviador del proxy: un socket UDP por jugador en un solo hilo.
+mio = { version = "1", features = ["os-poll", "net"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+# panic = "unwind" a propósito: cada función JNI usa catch_unwind para que un
+# panic no tumbe la JVM.
+
+# sendmmsg en Linux.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"

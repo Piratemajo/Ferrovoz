@@ -1,0 +1,27 @@
+name: Ferrovoz
+version: '${version}'
+main: dev.ferrovoz.bukkit.FerrovozPlugin
+api-version: '26.3'
+author: Piratemajo
+description: Proximity voice chat
+folia-supported: true
+
+commands:
+  voz:
+    description: Voice chat groups and moderation (also /voice)
+    usage: /voice [group|status|mute|unmute]
+    aliases: [voice]
+
+permissions:
+  ferrovoz.speak:
+    description: Talk in voice chat
+    default: true
+  ferrovoz.shout:
+    description: Shout (longer range)
+    default: true
+  ferrovoz.groups:
+    description: Create and join voice groups
+    default: true
+  ferrovoz.admin:
+    description: Moderation commands (/voice status, mute, unmute)
+    default: op

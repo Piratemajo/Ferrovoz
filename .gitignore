@@ -1,0 +1,9 @@
+native/target/
+mod/build/
+mod/.gradle/
+mod/run/
+mod/natives-prebuilt/
+.idea/
+*.iml
+.DS_Store
+native/out/
