@@ -1,9 +1,9 @@
-# Ferrovoz — Chat de voz de proximidad
+# Ferrovoz: chat de voz de proximidad
 
 **Habla con quien tengas cerca, óyelo desde donde está y deja que el mundo cambie cómo suena.**
-Ferrovoz es un chat de voz de proximidad para **Minecraft 26.3** con un motor de alto rendimiento escrito en **Rust**.
+Ferrovoz es un chat de voz de proximidad para **Minecraft 26.3 y 1.21.1** con un motor de alto rendimiento escrito en **Rust**.
 
-**Un solo `.jar`** para todo: mod de **Fabric, NeoForge y Forge**, plugin de **Paper, Purpur, Folia y Spigot**, y proxies **Velocity y BungeeCord**.
+Funciona como mod de **Fabric, NeoForge y Forge**, como plugin de **Paper, Purpur, Folia y Spigot** y en proxies **Velocity y BungeeCord**. Para 26.3 hay un solo `.jar` para todo; para 1.21.1, uno para Fabric y otro para NeoForge y Forge (los dos sirven también como plugin).
 
 ---
 
@@ -72,13 +72,25 @@ Ferrovoz es un chat de voz de proximidad para **Minecraft 26.3** con un motor de
 
 ## Instalación
 
+**Minecraft 26.3**: `ferrovoz-26.3-<versión>.jar` para todo.
+
 | Dónde | Cargador | Pon el jar en | Necesita además |
 |---|---|---|---|
 | Cliente o servidor | **Fabric** 26.3 | `mods/` | Fabric API |
-| Cliente o servidor | **NeoForge** 26.3 | `mods/` | — |
-| Cliente o servidor | **Forge** 26.3 (66.1+) | `mods/` | — |
-| Servidor | **Paper / Purpur / Folia / Spigot** 26.3 | `plugins/` | — |
+| Cliente o servidor | **NeoForge** 26.3 | `mods/` | - |
+| Cliente o servidor | **Forge** 26.3 (66.1+) | `mods/` | - |
+| Servidor | **Paper / Purpur / Folia / Spigot** 26.3 | `plugins/` | - |
 | Proxy | **Velocity** 4.3+ / **BungeeCord** | `plugins/` | Java 25 |
+
+**Minecraft 1.21.1**: `-fabric` para Fabric y `-neoforge` para NeoForge y Forge. Para Paper y los proxies vale cualquiera de los dos.
+
+| Dónde | Cargador | Jar | Pon el jar en | Necesita además |
+|---|---|---|---|---|
+| Cliente o servidor | **Fabric** 1.21.1 | `-fabric` | `mods/` | Fabric API |
+| Cliente o servidor | **NeoForge** 21.1 | `-neoforge` | `mods/` | - |
+| Cliente o servidor | **Forge** 52 | `-neoforge` | `mods/` | - |
+| Servidor | **Paper / Purpur / Folia / Spigot** 1.21.1 | cualquiera | `plugins/` | - |
+| Proxy | **Velocity** / **BungeeCord** | cualquiera | `plugins/` | Java 21 |
 
 1. Instala Ferrovoz en el **servidor** y en cada **jugador**.
 2. Abre el **puerto UDP 24454** en el servidor (se cambia en `ferrovoz.properties`). Si no puedes, la voz funciona igual por la conexión del juego.

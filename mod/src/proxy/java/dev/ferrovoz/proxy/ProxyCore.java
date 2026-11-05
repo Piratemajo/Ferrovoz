@@ -54,12 +54,26 @@ public final class ProxyCore {
             if (Files.exists(file)) {
                 try (Reader r = Files.newBufferedReader(file)) {
                     p.load(r);
-                    c.port = Integer.parseInt(p.getProperty("port", String.valueOf(c.port)).trim());
-                    c.bindHost = p.getProperty("bind_host", c.bindHost).trim();
-                    c.publicHost = p.getProperty("public_host", c.publicHost).trim();
-                } catch (IOException | NumberFormatException e) {
-                    FerrovozLog.LOG.warn("{} is invalid, using defaults", file, e);
+                } catch (IOException | IllegalArgumentException e) {
+                    FerrovozLog.LOG.warn("Could not read {}, using defaults (the file is left untouched)", file, e);
+                    return c;
                 }
+                c.bindHost = p.getProperty("bind_host", c.bindHost).trim();
+                c.publicHost = p.getProperty("public_host", c.publicHost).trim();
+                String rawPort = p.getProperty("port", String.valueOf(c.port)).trim();
+                int port = -1;
+                try {
+                    port = Integer.parseInt(rawPort);
+                } catch (NumberFormatException ignored) {
+                    // se avisa abajo
+                }
+                if (port < 1 || port > 65535) {
+                    // No se reescribe, para no perder lo que haya puesto el administrador.
+                    FerrovozLog.LOG.warn("{}: port='{}' is not valid (1-65535); using {} and leaving the file untouched",
+                            file, rawPort, c.port);
+                    return c;
+                }
+                c.port = port;
             }
             try {
                 Files.createDirectories(file.getParent());

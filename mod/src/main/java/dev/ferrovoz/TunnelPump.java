@@ -70,5 +70,13 @@ public final class TunnelPump implements AutoCloseable {
         running = false;
         thread.interrupt();
         players.clear();
+        // Que no siga enviando con el relé ya parado.
+        if (Thread.currentThread() != thread) {
+            try {
+                thread.join(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 }

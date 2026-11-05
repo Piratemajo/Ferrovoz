@@ -3,8 +3,8 @@
 //! Capa JNI. Cada `Java_dev_ferrovoz_FerrovozNative_*` corresponde a un
 //! `static native` de `dev.ferrovoz.FerrovozNative`.
 //!
-//! Los objetos se pasan a Java como un `long` (puntero a `Box`). Java llama al
-//! `*Stop` correspondiente una sola vez y no vuelve a usar el handle.
+//! Los objetos se pasan a Java como un `long` (identificador en un registro de
+//! `Arc`, ver `into_handle`). Llamar con un handle ya parado no hace nada.
 
 pub mod client;
 pub mod forwarder;
@@ -34,7 +34,12 @@ use jni::sys::{jboolean, jbyteArray, jfloat, jfloatArray, jint, jlong, jlongArra
 use jni::JNIEnv;
 use server::{Ranges, VoiceServer};
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::any::Any;
+use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::{Arc, OnceLock, PoisonError, RwLock};
+use std::time::{Duration, Instant};
 
 // ---------------------------------------------------------------------------
 // Utilidades
@@ -48,24 +53,51 @@ fn guard<T>(default: T, f: impl FnOnce() -> T) -> T {
     })
 }
 
-fn into_handle<T>(v: T) -> jlong {
-    Box::into_raw(Box::new(v)) as jlong
+// Registro de handles. Java guarda un número; cada llamada JNI saca un `Arc` del
+// registro y lo suelta al terminar, así que un `*Stop` desde otro hilo (túnel, red)
+// no destruye el objeto mientras se usa. Un handle parado, repetido o de otro tipo
+// da `None`.
+
+type AnyHandle = Arc<dyn Any + Send + Sync>;
+
+fn handles() -> &'static RwLock<HashMap<jlong, AnyHandle>> {
+    static HANDLES: OnceLock<RwLock<HashMap<jlong, AnyHandle>>> = OnceLock::new();
+    HANDLES.get_or_init(Default::default)
 }
 
-/// # Safety
-/// `h` debe venir de `into_handle::<T>` y no haber sido liberado.
-unsafe fn borrow<'a, T>(h: jlong) -> Option<&'a T> {
-    (h as *const T).as_ref()
+fn into_handle<T: Any + Send + Sync>(v: T) -> jlong {
+    static NEXT: AtomicI64 = AtomicI64::new(1);
+    let h = NEXT.fetch_add(1, Ordering::Relaxed);
+    handles().write().unwrap_or_else(PoisonError::into_inner).insert(h, Arc::new(v));
+    h
 }
 
-/// # Safety
-/// Igual que `borrow`; tras esto el handle queda inválido.
-unsafe fn take<T>(h: jlong) -> Option<Box<T>> {
+/// El objeto del handle mientras dure la llamada, o `None` si ya se paró.
+fn borrow<T: Any + Send + Sync>(h: jlong) -> Option<Arc<T>> {
     if h == 0 {
-        None
-    } else {
-        Some(Box::from_raw(h as *mut T))
+        return None;
     }
+    let any = handles().read().unwrap_or_else(PoisonError::into_inner).get(&h)?.clone();
+    any.downcast::<T>().ok()
+}
+
+/// Quita el handle del registro y espera (2 s como mucho) a que acaben las llamadas
+/// en curso, para que el puerto UDP y los hilos estén libres al volver a Java. Si
+/// alguna tarda más, el objeto se destruye cuando termine.
+fn take<T: Any + Send + Sync>(h: jlong) -> Option<Arc<T>> {
+    if h == 0 {
+        return None;
+    }
+    let mut map = handles().write().unwrap_or_else(PoisonError::into_inner);
+    let any = map.get(&h)?.clone();
+    let obj = any.downcast::<T>().ok()?;
+    map.remove(&h);
+    drop(map);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Arc::strong_count(&obj) > 1 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    Some(obj)
 }
 
 fn resolve(host: &str, port: u16) -> Option<SocketAddr> {
@@ -144,7 +176,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverStart(
 
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverStop(_: JNIEnv, _: JClass, h: jlong) {
-    guard((), || drop(unsafe { take::<VoiceServer>(h) }))
+    guard((), || drop(take::<VoiceServer>(h)))
 }
 
 #[no_mangle]
@@ -155,7 +187,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverAddPlayer(
     msb: jlong,
     lsb: jlong,
 ) -> jbyteArray {
-    let key = guard(None, || unsafe { borrow::<VoiceServer>(h) }.map(|s| s.add_player(protocol::uuid_from_java(msb, lsb))));
+    let key = guard(None, || borrow::<VoiceServer>(h).map(|s| s.add_player(protocol::uuid_from_java(msb, lsb))));
     match key {
         Some(k) => env.byte_array_from_slice(&k).map(|a| a.into_raw()).unwrap_or(std::ptr::null_mut()),
         None => std::ptr::null_mut(),
@@ -165,7 +197,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverAddPlayer(
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverRemovePlayer(_: JNIEnv, _: JClass, h: jlong, msb: jlong, lsb: jlong) {
     guard((), || {
-        if let Some(s) = unsafe { borrow::<VoiceServer>(h) } {
+        if let Some(s) = borrow::<VoiceServer>(h) {
             s.remove_player(&protocol::uuid_from_java(msb, lsb));
         }
     })
@@ -187,7 +219,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverUpdatePlayer(
     role: jint,
 ) {
     guard((), || {
-        if let Some(s) = unsafe { borrow::<VoiceServer>(h) } {
+        if let Some(s) = borrow::<VoiceServer>(h) {
             s.update_player_with_role(
                 &protocol::uuid_from_java(msb, lsb),
                 [x, y, z],
@@ -209,7 +241,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverSetRoleRules(
     dead: jint,
 ) {
     guard((), || {
-        if let Some(s) = unsafe { borrow::<VoiceServer>(h) } {
+        if let Some(s) = borrow::<VoiceServer>(h) {
             s.set_role_rules(crate::roles::RoleRules {
                 spectator: crate::roles::RoleRule::from_i32(spectator),
                 dead: crate::roles::RoleRule::from_i32(dead),
@@ -228,7 +260,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverSetMuted(
     muted: jboolean,
 ) {
     guard((), || {
-        if let Some(s) = unsafe { borrow::<VoiceServer>(h) } {
+        if let Some(s) = borrow::<VoiceServer>(h) {
             s.set_muted(&protocol::uuid_from_java(msb, lsb), muted != 0);
         }
     })
@@ -237,7 +269,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverSetMuted(
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverSetMaxDistance(_: JNIEnv, _: JClass, h: jlong, d: jfloat) {
     guard((), || {
-        if let Some(s) = unsafe { borrow::<VoiceServer>(h) } {
+        if let Some(s) = borrow::<VoiceServer>(h) {
             s.set_max_distance(d);
         }
     })
@@ -245,7 +277,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverSetMaxDistance(_: 
 
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverConnectedCount(_: JNIEnv, _: JClass, h: jlong) -> jint {
-    guard(0, || unsafe { borrow::<VoiceServer>(h) }.map_or(0, |s| s.connected_count() as jint))
+    guard(0, || borrow::<VoiceServer>(h).map_or(0, |s| s.connected_count() as jint))
 }
 
 // ---------------------------------------------------------------------------
@@ -293,7 +325,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientStart(
 
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientStop(_: JNIEnv, _: JClass, h: jlong) {
-    guard((), || drop(unsafe { take::<VoiceClient>(h) }))
+    guard((), || drop(take::<VoiceClient>(h)))
 }
 
 /// Una vez por tick: orientación del oyente y estado de la tecla.
@@ -308,7 +340,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientTick(
     talk_mode: jint,
 ) {
     guard((), || {
-        if let Some(c) = unsafe { borrow::<VoiceClient>(h) } {
+        if let Some(c) = borrow::<VoiceClient>(h) {
             c.set_listener_yaw(yaw);
             c.set_listener_pitch(pitch);
             c.set_push_to_talk(ptt != 0);
@@ -321,7 +353,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientTick(
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientSetMode(_: JNIEnv, _: JClass, h: jlong, mode: jint) {
     guard((), || {
-        if let Some(c) = unsafe { borrow::<VoiceClient>(h) } {
+        if let Some(c) = borrow::<VoiceClient>(h) {
             c.set_mode(if mode == 1 { TransmitMode::VoiceActivation } else { TransmitMode::PushToTalk });
         }
     })
@@ -329,7 +361,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientSetMode(_: JNIEnv,
 
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientGetMode(_: JNIEnv, _: JClass, h: jlong) -> jint {
-    guard(0, || unsafe { borrow::<VoiceClient>(h) }.map_or(0, |c| c.mode() as jint))
+    guard(0, || borrow::<VoiceClient>(h).map_or(0, |c| c.mode() as jint))
 }
 
 macro_rules! client_setter {
@@ -337,7 +369,7 @@ macro_rules! client_setter {
         #[no_mangle]
         pub extern "system" fn $jname(_: JNIEnv, _: JClass, h: jlong, v: jboolean) {
             guard((), || {
-                if let Some(c) = unsafe { borrow::<VoiceClient>(h) } {
+                if let Some(c) = borrow::<VoiceClient>(h) {
                     c.$method(v != 0);
                 }
             })
@@ -347,7 +379,7 @@ macro_rules! client_setter {
         #[no_mangle]
         pub extern "system" fn $jname(_: JNIEnv, _: JClass, h: jlong, v: jfloat) {
             guard((), || {
-                if let Some(c) = unsafe { borrow::<VoiceClient>(h) } {
+                if let Some(c) = borrow::<VoiceClient>(h) {
                     c.$method(v);
                 }
             })
@@ -389,7 +421,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientSetDevices(
     let input = jstr(&mut env, &input);
     let output = jstr(&mut env, &output);
     guard((), || {
-        if let Some(c) = unsafe { borrow::<VoiceClient>(h) } {
+        if let Some(c) = borrow::<VoiceClient>(h) {
             c.set_devices(&input, &output);
         }
     })
@@ -398,7 +430,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientSetDevices(
 /// 0 = abriendo, 1 = abiertos, 2 = error.
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientAudioStatus(_: JNIEnv, _: JClass, h: jlong) -> jint {
-    guard(0, || unsafe { borrow::<VoiceClient>(h) }.map_or(0, |c| c.audio_status() as jint))
+    guard(0, || borrow::<VoiceClient>(h).map_or(0, |c| c.audio_status() as jint))
 }
 
 fn string_array(env: &mut JNIEnv, items: &[String]) -> jobjectArray {
@@ -435,18 +467,18 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_listOutputDevices(mut en
 
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientIsTalking(_: JNIEnv, _: JClass, h: jlong) -> jboolean {
-    jbool(guard(false, || unsafe { borrow::<VoiceClient>(h) }.is_some_and(|c| c.is_talking())))
+    jbool(guard(false, || borrow::<VoiceClient>(h).is_some_and(|c| c.is_talking())))
 }
 
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientIsConnected(_: JNIEnv, _: JClass, h: jlong) -> jboolean {
-    jbool(guard(false, || unsafe { borrow::<VoiceClient>(h) }.is_some_and(|c| c.is_connected())))
+    jbool(guard(false, || borrow::<VoiceClient>(h).is_some_and(|c| c.is_connected())))
 }
 
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientSetCaveEcho(_: JNIEnv, _: JClass, h: jlong, enabled: jboolean) {
     guard((), || {
-        if let Some(c) = unsafe { borrow::<VoiceClient>(h) } {
+        if let Some(c) = borrow::<VoiceClient>(h) {
             c.set_cave_echo(enabled != 0);
         }
     })
@@ -455,7 +487,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientSetCaveEcho(_: JNI
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientSetUnderwaterEffect(_: JNIEnv, _: JClass, h: jlong, enabled: jboolean) {
     guard((), || {
-        if let Some(c) = unsafe { borrow::<VoiceClient>(h) } {
+        if let Some(c) = borrow::<VoiceClient>(h) {
             c.set_underwater_effect(enabled != 0);
         }
     })
@@ -464,7 +496,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientSetUnderwaterEffec
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientGoodbye(_: JNIEnv, _: JClass, h: jlong) {
     guard((), || {
-        if let Some(c) = unsafe { borrow::<VoiceClient>(h) } {
+        if let Some(c) = borrow::<VoiceClient>(h) {
             c.goodbye();
         }
     })
@@ -474,7 +506,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientGoodbye(_: JNIEnv,
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientSetHrtf(_: JNIEnv, _: JClass, h: jlong, enabled: jboolean) {
     guard((), || {
-        if let Some(c) = unsafe { borrow::<VoiceClient>(h) } {
+        if let Some(c) = borrow::<VoiceClient>(h) {
             c.set_hrtf(enabled != 0);
         }
     })
@@ -489,7 +521,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientSetMicProcessing(
     auto_gain: jboolean,
 ) {
     guard((), || {
-        if let Some(c) = unsafe { borrow::<VoiceClient>(h) } {
+        if let Some(c) = borrow::<VoiceClient>(h) {
             c.set_mic_processing(echo_cancel != 0, auto_gain != 0);
         }
     })
@@ -498,7 +530,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientSetMicProcessing(
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientSetUnderwater(_: JNIEnv, _: JClass, h: jlong, underwater: jboolean) {
     guard((), || {
-        if let Some(c) = unsafe { borrow::<VoiceClient>(h) } {
+        if let Some(c) = borrow::<VoiceClient>(h) {
             c.set_underwater(underwater != 0);
         }
     })
@@ -506,12 +538,12 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientSetUnderwater(_: J
 
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientMicSilent(_: JNIEnv, _: JClass, h: jlong) -> jboolean {
-    guard(0, || unsafe { borrow::<VoiceClient>(h) }.map_or(0, |c| c.mic_silent() as jboolean))
+    guard(0, || borrow::<VoiceClient>(h).map_or(0, |c| c.mic_silent() as jboolean))
 }
 
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientMicLevel(_: JNIEnv, _: JClass, h: jlong) -> jfloat {
-    guard(0.0, || unsafe { borrow::<VoiceClient>(h) }.map_or(0.0, |c| c.mic_level()))
+    guard(0.0, || borrow::<VoiceClient>(h).map_or(0.0, |c| c.mic_level()))
 }
 
 /// `[msb0, lsb0, grupo0, msb1, lsb1, grupo1, ...]` de quien está hablando
@@ -519,7 +551,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientMicLevel(_: JNIEnv
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientSpeakingPlayers(env: JNIEnv, _: JClass, h: jlong) -> jlongArray {
     let flat: Vec<jlong> = guard(Vec::new(), || {
-        unsafe { borrow::<VoiceClient>(h) }
+        borrow::<VoiceClient>(h)
             .map(|c| {
                 c.speaking_players()
                     .iter()
@@ -542,12 +574,12 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientSpeakingPlayers(en
 // Volumen por jugador, oclusión, reverb, túnel, estadísticas
 // ---------------------------------------------------------------------------
 
-fn client<'a>(h: jlong) -> Option<&'a VoiceClient> {
-    unsafe { borrow::<VoiceClient>(h) }
+fn client(h: jlong) -> Option<Arc<VoiceClient>> {
+    borrow::<VoiceClient>(h)
 }
 
-fn server<'a>(h: jlong) -> Option<&'a VoiceServer> {
-    unsafe { borrow::<VoiceServer>(h) }
+fn server(h: jlong) -> Option<Arc<VoiceServer>> {
+    borrow::<VoiceServer>(h)
 }
 
 #[no_mangle]
@@ -1067,7 +1099,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_proxyStart(mut env: JNIE
 
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_proxyStop(_: JNIEnv, _: JClass, h: jlong) {
-    guard((), || drop(unsafe { take::<VoiceForwarder>(h) }))
+    guard((), || drop(take::<VoiceForwarder>(h)))
 }
 
 /// El jugador está en el servidor con relé `host:port`. false si no se resuelve.
@@ -1086,7 +1118,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_proxyRoute(
     let host = jstr(&mut env, &host);
     let key = env.convert_byte_array(&key).unwrap_or_default();
     guard(JNI_FALSE, || {
-        let Some(f) = (unsafe { borrow::<VoiceForwarder>(h) }) else { return JNI_FALSE };
+        let Some(f) = borrow::<VoiceForwarder>(h) else { return JNI_FALSE };
         let Ok(key) = <[u8; 32]>::try_from(key.as_slice()) else { return JNI_FALSE };
         // Host vacío no vale aquí (sería escuchar en todas las interfaces).
         let Some(addr) = (if host.is_empty() { None } else { resolve(&host, port as u16) }) else { return JNI_FALSE };
@@ -1098,7 +1130,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_proxyRoute(
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_proxyRemove(_: JNIEnv, _: JClass, h: jlong, msb: jlong, lsb: jlong) {
     guard((), || {
-        if let Some(f) = unsafe { borrow::<VoiceForwarder>(h) } {
+        if let Some(f) = borrow::<VoiceForwarder>(h) {
             f.remove(&protocol::uuid_from_java(msb, lsb));
         }
     })
@@ -1135,7 +1167,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_proxySetNetGroup(
         members.push((protocol::uuid_from_java(pair[0], pair[1]), member_name));
     }
     guard((), || {
-        if let Some(f) = unsafe { borrow::<VoiceForwarder>(h) } {
+        if let Some(f) = borrow::<VoiceForwarder>(h) {
             let owner = (owner_msb != 0 || owner_lsb != 0).then(|| protocol::uuid_from_java(owner_msb, owner_lsb));
             f.set_net_group(group as u32, name, owner, members);
         }
@@ -1147,7 +1179,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_proxySetNetGroup(
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_proxyStatus(env: JNIEnv, _: JClass, h: jlong) -> jlongArray {
     use std::sync::atomic::Ordering::Relaxed;
     let v: [jlong; 6] = guard([0; 6], || {
-        unsafe { borrow::<VoiceForwarder>(h) }.map_or([0; 6], |f| {
+        borrow::<VoiceForwarder>(h).map_or([0; 6], |f| {
             let s = f.stats();
             [
                 f.routes() as jlong,
@@ -1282,4 +1314,75 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientPeerStates(env: JN
         return std::ptr::null_mut();
     }
     arr.into_raw()
+}
+
+#[cfg(test)]
+mod handle_tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    fn local() -> SocketAddr {
+        "127.0.0.1:0".parse().unwrap()
+    }
+
+    /// Parar el relé con otros hilos usándolo (túnel, red) y que luego el handle ya
+    /// no devuelva nada.
+    #[test]
+    fn stop_while_other_threads_use_the_handle() {
+        for _ in 0..20 {
+            let h = into_handle(VoiceServer::start(local(), 48.0).unwrap());
+            let go = Arc::new(AtomicBool::new(true));
+            let workers: Vec<_> = (0..4)
+                .map(|i| {
+                    let go = go.clone();
+                    std::thread::spawn(move || {
+                        let id = [i as u8; 16];
+                        let mut calls = 0u32;
+                        while go.load(Ordering::Relaxed) {
+                            if let Some(s) = server(h) {
+                                s.add_player(id);
+                                let _ = s.poll_tunnel(&id);
+                                s.handle_tunnel(&id, &[1, 2, 3]);
+                                calls += 1;
+                            }
+                        }
+                        calls
+                    })
+                })
+                .collect();
+            std::thread::sleep(Duration::from_millis(5));
+            drop(take::<VoiceServer>(h));
+            assert!(server(h).is_none());
+            go.store(false, Ordering::Relaxed);
+            for w in workers {
+                w.join().unwrap();
+            }
+        }
+    }
+
+    /// Tras `*Stop` el puerto queda libre para volver a arrancar en él.
+    #[test]
+    fn stop_releases_the_port() {
+        let s = VoiceServer::start(local(), 48.0).unwrap();
+        let addr = s.local_addr().unwrap();
+        let h = into_handle(s);
+        let user = server(h).unwrap(); // una llamada "en curso" que acaba pronto
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            drop(user);
+        });
+        drop(take::<VoiceServer>(h));
+        t.join().unwrap();
+        VoiceServer::start(addr, 48.0).expect("port should be free after stop");
+    }
+
+    #[test]
+    fn stale_wrong_type_and_double_stop_are_harmless() {
+        let h = into_handle(VoiceServer::start(local(), 48.0).unwrap());
+        assert!(client(h).is_none(), "a server handle is not a client");
+        assert!(take::<VoiceServer>(h).is_some());
+        assert!(take::<VoiceServer>(h).is_none(), "second stop does nothing");
+        assert!(server(h).is_none());
+        assert!(server(0).is_none());
+    }
 }

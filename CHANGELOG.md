@@ -3,6 +3,13 @@
 Formato: una sección `## [versión]` por versión. Al publicar, el CI copia la
 sección de esa versión como notas de la release.
 
+## [Sin publicar]
+
+- **Minecraft 1.21.1**: Ferrovoz funciona también en 1.21.1, con las mismas funciones. Salen dos jars: `-fabric` (Fabric) y `-neoforge` (NeoForge 21.1 y Forge 52); los dos valen además como plugin de Paper/Spigot y de Velocity/BungeeCord. En Fabric 1.21.1 los permisos usan `fabric-permissions-api` (LuckPerms), con los mismos nodos `ferrovoz.*`.
+- Arreglado: el juego o el servidor podían cerrarse de golpe (fallo de memoria) al parar la voz mientras llegaba voz por el túnel: al apagar el servidor, al cambiar de servidor o al desactivar la voz en J (sobre todo en NeoForge y Forge).
+- Arreglado: tras morir y reaparecer, las paredes que calcula el servidor se medían desde donde moriste hasta volver a entrar (Fabric, NeoForge y Forge).
+- Arreglado: un valor mal escrito en `ferrovoz.properties` o `ferrovoz-proxy.properties` (por ejemplo `max_distance=48,5`) devolvía a sus valores por defecto los ajustes que venían detrás y reescribía el archivo. Ahora solo ese valor usa el de por defecto, se avisa en el log y el archivo no se toca. Se admite la coma decimal.
+
 ## [0.10.0]
 
 - Arreglado: en un hueco pequeño (3×3) la voz sonaba metálica y entrecortada. Las cuatro paredes a la misma distancia devolvían su eco a la vez, más fuerte que la propia voz, y se saturaba. Ahora los primeros ecos de paredes a la misma distancia no se suman, entre todos suenan como mucho a la mitad que la voz (−6 dB), los cuartos muy pequeños tienen menos eco, y tu propio eco solo se oye en sitios grandes (en un cuarto pequeño sonaba como un doble de ti, con retraso).

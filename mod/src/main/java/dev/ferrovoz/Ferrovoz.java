@@ -215,7 +215,9 @@ public final class Ferrovoz {
         boolean refreshPermissions = ticks % PERMISSION_REFRESH_TICKS == 0;
         for (ServerPlayer p : srv.getPlayerList().getPlayers()) {
             UUID id = p.getUUID();
-            if (!registered.containsKey(id)) continue;
+            // Al reaparecer el ServerPlayer es otro objeto: se guarda el actual para
+            // que locate() no use la posición donde murió.
+            if (registered.replace(id, p) == null) continue;
             // El hash del ResourceKey identifica la dimensión sin depender de nombres de la API.
             int dimension = p.level().dimension().toString().hashCode();
             FerrovozNative.serverUpdatePlayer(s, id.getMostSignificantBits(), id.getLeastSignificantBits(),

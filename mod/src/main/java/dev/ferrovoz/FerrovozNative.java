@@ -89,9 +89,15 @@ public final class FerrovozNative {
         } catch (ReflectiveOperationException | LinkageError e) {
             // no es Fabric
         }
-        // NeoForge: FMLEnvironment.getDist() == DEDICATED_SERVER
+        // NeoForge: FMLEnvironment.getDist() == DEDICATED_SERVER (en 21.1 es el campo dist)
         try {
-            Object dist = Class.forName("net.neoforged.fml.loading.FMLEnvironment").getMethod("getDist").invoke(null);
+            Class<?> env = Class.forName("net.neoforged.fml.loading.FMLEnvironment");
+            Object dist;
+            try {
+                dist = env.getMethod("getDist").invoke(null);
+            } catch (NoSuchMethodException e) {
+                dist = env.getField("dist").get(null);
+            }
             return "DEDICATED_SERVER".equals(String.valueOf(dist));
         } catch (ReflectiveOperationException | LinkageError e) {
             // no es NeoForge

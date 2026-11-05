@@ -1,0 +1,26 @@
+# Ferrovoz en Forge 1.21.1. El mismo jar trae META-INF/neoforge.mods.toml (NeoForge) y plugin.yml (Paper).
+modLoader="javafml"
+loaderVersion="[52,)"
+license="MIT"
+
+[[mods]]
+modId="ferrovoz"
+version="${version}"
+displayName="Ferrovoz"
+authors="Piratemajo"
+logoFile="assets/ferrovoz/icon.png"
+description='''Proximity voice chat'''
+
+[[dependencies.ferrovoz]]
+    modId="forge"
+    mandatory=true
+    versionRange="[52,)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.ferrovoz]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="[1.21.1,1.21.2)"
+    ordering="NONE"
+    side="BOTH"

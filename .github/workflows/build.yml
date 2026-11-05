@@ -151,9 +151,20 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew build -PskipNative
+      # Minecraft 1.21.1: Java 21 y los mismos binarios nativos (mod/natives-prebuilt).
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Compilar mod (Minecraft 1.21.1)
+        working-directory: mod-1.21.1
+        run: |
+          chmod +x gradlew
+          ./gradlew build -PskipNative
+          cp build/libs/*.jar ../mod/build/libs/
       - uses: actions/upload-artifact@v4
         with:
-          name: ferrovoz-mod
+          name: ferrovoz
           path: mod/build/libs/*.jar
 
   # Al subir una etiqueta vX.Y.Z publica la release en este repo con el jar y las
@@ -169,7 +180,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: ferrovoz-mod
+          name: ferrovoz
           path: jar
       - name: Comprobar versión y preparar archivos
         id: prep
@@ -182,7 +193,7 @@ jobs:
             echo "La etiqueta es v$TAG pero mod/gradle.properties dice $VERSION. Deben coincidir."; exit 1
           fi
           python3 tools/release_notes.py "$VERSION" > notes.md
-          JAR=$(ls jar/*.jar | grep -v -- '-sources' | head -1)
+          JAR=$(ls jar/*.jar | grep -v -- '-sources' | grep -- "ferrovoz-$MC-" | head -1)
           mkdir dist
           cp "$JAR" "dist/$NAME"
           # El jar tiene que llevar las 5 plataformas.
@@ -193,7 +204,22 @@ jobs:
           for f in fabric.mod.json META-INF/neoforge.mods.toml META-INF/mods.toml plugin.yml pack.mcmeta velocity-plugin.json bungee.yml; do
             unzip -l "dist/$NAME" | grep -q " $f\$" || { echo "Falta $f en el jar"; exit 1; }
           done
-          (cd dist && sha256sum "$NAME" > "$NAME.sha256")
+          # Minecraft 1.21.1: un jar para Fabric y otro para NeoForge/Forge (los dos con Paper y proxy).
+          FABRIC_1211="ferrovoz-1.21.1-$VERSION-fabric.jar"
+          NEOFORGE_1211="ferrovoz-1.21.1-$VERSION-neoforge.jar"
+          cp "jar/$FABRIC_1211" "jar/$NEOFORGE_1211" dist/
+          for f in fabric.mod.json plugin.yml pack.mcmeta velocity-plugin.json bungee.yml; do
+            unzip -l "dist/$FABRIC_1211" | grep -q " $f\$" || { echo "Falta $f en $FABRIC_1211"; exit 1; }
+          done
+          for f in META-INF/neoforge.mods.toml META-INF/mods.toml plugin.yml pack.mcmeta velocity-plugin.json bungee.yml; do
+            unzip -l "dist/$NEOFORGE_1211" | grep -q " $f\$" || { echo "Falta $f en $NEOFORGE_1211"; exit 1; }
+          done
+          for j in "dist/$FABRIC_1211" "dist/$NEOFORGE_1211"; do
+            for p in windows-x86_64 linux-x86_64 linux-aarch64 macos-aarch64 macos-x86_64; do
+              unzip -l "$j" | grep -q "natives/$p/" || { echo "Falta natives/$p en $j"; exit 1; }
+            done
+          done
+          (cd dist && for f in *.jar; do sha256sum "$f" > "$f.sha256"; done)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           # Versiones con guion (1.0.0-alpha, 0.8.0-beta.2...) son prerelease.
           case "$VERSION" in *-*) echo "pre=--prerelease" >> "$GITHUB_OUTPUT";; *) echo "pre=" >> "$GITHUB_OUTPUT";; esac

@@ -1,6 +1,6 @@
-# Ferrovoz 🎙️🦀
+# Ferrovoz
 
-Chat de voz de proximidad para **Minecraft 26.3** con el motor escrito en **Rust**. Por **Piratemajo**.
+Chat de voz de proximidad para **Minecraft 26.3** y **1.21.1** con el motor escrito en **Rust**. Por **Piratemajo**.
 Un solo `.jar` para todo: mod de **Fabric**, **NeoForge** o **Forge** (cliente y servidor), plugin de **Paper / Purpur / Folia / Spigot** y plugin de proxy para **Velocity / BungeeCord** y derivados.
 Java solo hace de pegamento con el juego; captura, códec, red, cifrado, mezcla y efectos viven en Rust.
 
@@ -103,6 +103,7 @@ Java solo hace de pegamento con el juego; captura, códec, red, cifrado, mezcla 
 | `mod/src/forge` | Forge (mismo jar) |
 | `mod/src/bukkit` | Plugin de Paper/Purpur/Folia/Spigot (mismo jar) |
 | `mod/src/proxy` | Plugin de Velocity y BungeeCord (mismo jar) |
+| `mod-1.21.1/` | Minecraft 1.21.1: solo la capa que habla con el juego; el resto lo coge de `mod/` (ver [Minecraft 1.21.1](#minecraft-1211)) |
 
 ## Compilar
 
@@ -115,7 +116,7 @@ cd ../mod && ./gradlew build     # compila Rust (con y sin audio) y lo mete en e
 
 En Windows, `gradlew.bat build`. El jar sale en `mod/build/libs/ferrovoz-<Minecraft>-<versión>.jar`.
 
-**Lo normal es dejar que lo compile GitHub:** el repo es público, así que Actions es gratis en todos los sistemas. Cada push a `main` (y cada pull request) pasa los tests en las 5 plataformas y deja el **jar universal** en la página de la ejecución (Actions → la ejecución → *Artifacts* → `ferrovoz-mod`). Los cambios que solo tocan `.md` o `docs/` no lo lanzan.
+**Lo normal es dejar que lo compile GitHub:** el repo es público, así que Actions es gratis en todos los sistemas. Cada push a `main` (y cada pull request) pasa los tests en las 5 plataformas y deja los **jars** (el universal de 26.3 y los dos de 1.21.1) en la página de la ejecución (Actions → la ejecución → *Artifacts* → `ferrovoz`). Los cambios que solo tocan `.md` o `docs/` no lo lanzan.
 
 **El jar local solo lleva los binarios de tu sistema.** Si lo compilas en Windows, no tendrá voz en un servidor Linux (casi todos los hostings) ni en un Mac. Sirve para probar rápido; para meter más plataformas, pon sus dos archivos en `mod/natives-prebuilt/natives/<plataforma>/` antes de `./gradlew build`:
 
@@ -143,6 +144,27 @@ En cada sistema, desde `native/`: `cargo build --release` (cliente, con audio: e
    ```
    Pasa los tests, compila Windows, compila Linux dentro de WSL (`tools/build-linux.sh`), y hace el jar con todo lo que haya en `mod/natives-prebuilt/`. Al final dice qué plataformas lleva y avisa de las que faltan. `-SinLinux` y `-SinTests` para ir más rápido.
 
+### Minecraft 1.21.1
+
+`mod-1.21.1/` es un proyecto de Gradle aparte que comparte con `mod/` todo lo que no depende de la versión del juego: el núcleo en Rust, el protocolo, la configuración, `/voz` y sus mensajes, el plugin de Paper y el de proxy. Solo tiene su propia versión de la capa que toca Minecraft (eventos, red, HUD, pantallas, iconos, teclas). La versión del mod es siempre la de `mod/gradle.properties`.
+
+Se compila con **JDK 21** (el de Minecraft 1.21.1):
+
+```bash
+cd mod-1.21.1 && ./gradlew build
+```
+
+En 1.21.1 Fabric usa los nombres ofuscados de Minecraft y NeoForge/Forge los de Mojang, así que salen **dos jars** en `mod-1.21.1/build/libs/`:
+
+| Jar | Vale para |
+|---|---|
+| `ferrovoz-1.21.1-<versión>-fabric.jar` | Fabric (cliente y servidor), Paper/Spigot/Purpur/Folia, Velocity/BungeeCord |
+| `ferrovoz-1.21.1-<versión>-neoforge.jar` | NeoForge 21.1, Forge 52, Paper/Spigot/Purpur/Folia, Velocity/BungeeCord |
+
+Los binarios nativos de otras plataformas se leen de la misma carpeta que la 26.3 (`mod/natives-prebuilt/`). Diferencias con la 26.3: en Fabric los permisos usan `fabric-permissions-api` (la de LuckPerms, va dentro del jar) con los mismos nodos `ferrovoz.*`; el resto funciona igual. El protocolo de voz es el mismo, así que el plugin de proxy sirve para redes con servidores de las dos versiones.
+
+Si cambias algo de `mod/src` que toca Minecraft (lo que no está en la lista `SHARED_MAIN`/`SHARED_CLIENT` de `mod-1.21.1/build.gradle`), haz el mismo cambio en su copia de `mod-1.21.1/src`.
+
 ## Publicar una versión
 
 Las versiones se publican en la pestaña [Releases](../../releases) de este repo, con el jar universal (5 plataformas), su `.sha256` y las notas de `CHANGELOG.md`.
@@ -155,14 +177,14 @@ El CI compila todo, comprueba que la etiqueta coincide con `mod_version`, que el
 
 ## Instalación
 
-El mismo `.jar` vale para todo:
+Para Minecraft 26.3, el mismo `.jar` vale para todo. Para 1.21.1 hay dos: el `-fabric` para Fabric y el `-neoforge` para NeoForge y Forge (los dos valen también como plugin de Paper y de proxy). Lo demás es igual:
 
 | Dónde | Cargador | Dónde va el jar | Además | Configuración |
 |---|---|---|---|---|
 | Jugadores o servidor | **Fabric** 26.3 | `mods/` | Fabric API | `config/ferrovoz.properties` |
-| Jugadores o servidor | **NeoForge** 26.3 | `mods/` | — | `config/ferrovoz.properties` |
-| Jugadores o servidor | **Forge** 26.3 (66.1+) | `mods/` | — | `config/ferrovoz.properties` |
-| Servidor | **Paper, Purpur, Folia o Spigot** 26.3 | `plugins/` | — | `plugins/Ferrovoz/ferrovoz.properties` |
+| Jugadores o servidor | **NeoForge** 26.3 | `mods/` | - | `config/ferrovoz.properties` |
+| Jugadores o servidor | **Forge** 26.3 (66.1+) | `mods/` | - | `config/ferrovoz.properties` |
+| Servidor | **Paper, Purpur, Folia o Spigot** 26.3 | `plugins/` | - | `plugins/Ferrovoz/ferrovoz.properties` |
 
 | Proxy | **Velocity** 4.3+ o **BungeeCord** (y derivados) | `plugins/` | Java 25 | `plugins/ferrovoz/ferrovoz-proxy.properties` (Velocity) · `plugins/Ferrovoz/ferrovoz-proxy.properties` (BungeeCord) |
 

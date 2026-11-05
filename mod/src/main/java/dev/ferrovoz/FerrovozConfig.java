@@ -46,24 +46,67 @@ public final class FerrovozConfig {
     public static FerrovozConfig load(Path file) {
         FerrovozConfig c = new FerrovozConfig();
         Properties p = new Properties();
+        // Con algún valor mal el archivo no se reescribe, para no perder el resto.
+        boolean ok = true;
         if (Files.exists(file)) {
             try (Reader r = Files.newBufferedReader(file)) {
                 p.load(r);
-                c.bindHost = p.getProperty("bind_host", c.bindHost).trim();
-                c.port = Integer.parseInt(p.getProperty("port", String.valueOf(c.port)).trim());
-                c.publicHost = p.getProperty("public_host", c.publicHost).trim();
-                c.maxDistance = Float.parseFloat(p.getProperty("max_distance", String.valueOf(c.maxDistance)).trim());
-                c.whisperDistance = Float.parseFloat(p.getProperty("whisper_distance", String.valueOf(c.whisperDistance)).trim());
-                c.shoutDistance = Float.parseFloat(p.getProperty("shout_distance", String.valueOf(c.shoutDistance)).trim());
-                c.transport = parseTransport(p.getProperty("transport", "auto"));
-                c.spectators = parseRule(p.getProperty("spectators", "ghost"));
-                c.dead = parseRule(p.getProperty("dead", "normal"));
-            } catch (IOException | NumberFormatException e) {
-                FerrovozLog.LOG.warn("ferrovoz.properties is invalid, using defaults", e);
+            } catch (IOException | IllegalArgumentException e) {
+                FerrovozLog.LOG.warn("Could not read {}, using defaults (the file is left untouched)", file, e);
+                return c;
             }
+            c.bindHost = p.getProperty("bind_host", c.bindHost).trim();
+            c.publicHost = p.getProperty("public_host", c.publicHost).trim();
+            Integer port = parseInt(p, "port", c.port, 1, 65535);
+            Float max = parseFloat(p, "max_distance", c.maxDistance);
+            Float whisper = parseFloat(p, "whisper_distance", c.whisperDistance);
+            Float shout = parseFloat(p, "shout_distance", c.shoutDistance);
+            ok = port != null && max != null && whisper != null && shout != null;
+            if (port != null) c.port = port;
+            if (max != null) c.maxDistance = max;
+            if (whisper != null) c.whisperDistance = whisper;
+            if (shout != null) c.shoutDistance = shout;
+            c.transport = parseTransport(p.getProperty("transport", "auto"));
+            Integer spectators = parseRuleOrNull(p.getProperty("spectators", "ghost"));
+            Integer dead = parseRuleOrNull(p.getProperty("dead", "normal"));
+            ok &= spectators != null && dead != null;
+            c.spectators = spectators != null ? spectators : RULE_GHOST;
+            c.dead = dead != null ? dead : RULE_NORMAL;
         }
-        c.save(file);
+        if (ok) {
+            c.save(file); // crea el archivo o añade las claves nuevas
+        } else {
+            FerrovozLog.LOG.warn("{} has invalid values (see above); they use their defaults and the file is left untouched", file);
+        }
         return c;
+    }
+
+    /** Número entero en [min, max], o null (con aviso) si no lo es. */
+    static Integer parseInt(Properties p, String key, int def, int min, int max) {
+        String raw = p.getProperty(key);
+        if (raw == null) return def;
+        try {
+            int v = Integer.parseInt(raw.trim());
+            if (v >= min && v <= max) return v;
+        } catch (NumberFormatException ignored) {
+            // se avisa abajo
+        }
+        FerrovozLog.LOG.warn("ferrovoz.properties: {}='{}' is not valid (expected {}-{}); using {}", key, raw, min, max, def);
+        return null;
+    }
+
+    /** Distancia en bloques (&gt; 0); admite coma decimal ("48,5"). null (con aviso) si no vale. */
+    static Float parseFloat(Properties p, String key, float def) {
+        String raw = p.getProperty(key);
+        if (raw == null) return def;
+        try {
+            float v = Float.parseFloat(raw.trim().replace(',', '.'));
+            if (Float.isFinite(v) && v > 0f && v <= 10_000f) return v;
+        } catch (NumberFormatException ignored) {
+            // se avisa abajo
+        }
+        FerrovozLog.LOG.warn("ferrovoz.properties: {}='{}' is not a valid distance in blocks; using {}", key, raw, def);
+        return null;
     }
 
     static int parseTransport(String s) {
@@ -75,12 +118,18 @@ public final class FerrovozConfig {
     }
 
     static int parseRule(String s) {
+        Integer r = parseRuleOrNull(s);
+        return r != null ? r : RULE_NORMAL;
+    }
+
+    /** Regla por nombre, o null (con aviso) si no existe. */
+    static Integer parseRuleOrNull(String s) {
         String v = s.trim().toLowerCase(Locale.ROOT);
         for (int i = 0; i < RULE_NAMES.length; i++) {
             if (RULE_NAMES[i].equals(v)) return i;
         }
-        FerrovozLog.LOG.warn("ferrovoz.properties: unknown rule '{}' (use normal, listen, ghost, own or off); using normal", s);
-        return RULE_NORMAL;
+        FerrovozLog.LOG.warn("ferrovoz.properties: unknown rule '{}' (use normal, listen, ghost, own or off); using the default", s);
+        return null;
     }
 
     public static String ruleName(int rule) {

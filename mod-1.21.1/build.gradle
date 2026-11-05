@@ -1,0 +1,301 @@
+// Ferrovoz para Minecraft 1.21.1.
+//
+// Comparte con ../mod todo lo que no depende de la versión de Minecraft (núcleo en
+// Rust, protocolo, configuración, comandos, mensajes, plugin de Paper y de proxy...)
+// y solo tiene aquí la capa que habla con el juego (src/).
+//
+// En 1.21.1 Fabric usa nombres ofuscados (intermediary) y NeoForge/Forge los de
+// Mojang, así que salen dos jars:
+//   build/libs/ferrovoz-1.21.1-<versión>-fabric.jar    Fabric + Paper/Spigot + Velocity/BungeeCord
+//   build/libs/ferrovoz-1.21.1-<versión>-neoforge.jar  NeoForge + Forge + Paper/Spigot + Velocity/BungeeCord
+//
+// Se compila con Java 21: ./gradlew build
+
+plugins {
+    // Plugin de Loom que remapea (1.21.1 todavía viene ofuscado).
+    id 'fabric-loom' version "${loom_version}"
+}
+
+// La versión del mod es la de ../mod: las dos versiones de Minecraft salen a la vez.
+def sharedProps = new Properties()
+file('../mod/gradle.properties').withInputStream { sharedProps.load(it) }
+version = sharedProps.getProperty('mod_version')
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+
+def sharedSrc = file('../mod/src')
+
+loom {
+    splitEnvironmentSourceSets()
+
+    mods {
+        "ferrovoz" {
+            sourceSet sourceSets.main
+            sourceSet sourceSets.client
+        }
+    }
+}
+
+repositories {
+    mavenCentral()
+    maven {
+        name = 'PaperMC'
+        url = 'https://repo.papermc.io/repository/maven-public/'
+    }
+    maven {
+        name = 'CentralSnapshots'
+        url = 'https://central.sonatype.com/repository/maven-snapshots/'
+        content { includeGroup 'net.md-5' }
+        mavenContent { snapshotsOnly() }
+    }
+    maven {
+        name = 'NeoForged'
+        url = 'https://maven.neoforged.net/releases'
+        content { includeGroupByRegex 'net\\.neoforged.*' }
+    }
+    maven {
+        name = 'MinecraftForge'
+        url = 'https://maven.minecraftforge.net/'
+        content { includeGroup 'net.minecraftforge' }
+    }
+}
+
+// --- Código compartido con ../mod ---
+// Archivos de ../mod/src que no dependen de la versión de Minecraft. Se compilan
+// tal cual; el resto de ../mod/src se ignora porque aquí está su versión 1.21.1.
+def SHARED_MAIN = [
+        'FerrovozConfig', 'FerrovozLog', 'FerrovozNative', 'Messages', 'Protocol', 'SetupMessage',
+        'SoundGeometry', 'TunnelPump', 'VoiceCommands', 'WallTracer',
+].collect { "dev/ferrovoz/${it}.java".toString() }
+def SHARED_CLIENT = [
+        'ClientConfig', 'ReplayAudioOut', 'ReplayCompat', 'VoiceSlider',
+].collect { "dev/ferrovoz/client/${it}.java".toString() }
+// Recursos de ../mod que no valen para 1.21.1 (aquí tienen su propia versión).
+def NOT_SHARED_RESOURCES = ['fabric.mod.json', 'pack.mcmeta']
+
+// Añade root a set, pero solo los archivos de keep (o todos menos los de drop).
+def addShared = { SourceDirectorySet set, File root, List<String> keep, List<String> drop ->
+    set.srcDir(root)
+    def rootPath = root.toPath().toAbsolutePath().normalize()
+    set.exclude { FileTreeElement el ->
+        if (el.directory) return false
+        if (!el.file.toPath().toAbsolutePath().normalize().startsWith(rootPath)) return false
+        def rel = el.relativePath.pathString
+        return keep != null ? !keep.contains(rel) : drop.contains(rel)
+    }
+}
+
+addShared(sourceSets.main.java, new File(sharedSrc, 'main/java'), SHARED_MAIN, null)
+addShared(sourceSets.main.resources, new File(sharedSrc, 'main/resources'), null, NOT_SHARED_RESOURCES)
+addShared(sourceSets.client.java, new File(sharedSrc, 'client/java'), SHARED_CLIENT, null)
+
+sourceSets {
+    // Plugin de Paper/Spigot/Purpur: el mismo código que en 26.3 (solo usa la API de Bukkit).
+    bukkit {
+        java.srcDirs = [new File(sharedSrc, 'bukkit/java')]
+        resources.srcDirs = [new File(sharedSrc, 'bukkit/resources')]
+        compileClasspath += sourceSets.main.output
+    }
+    // Velocity y BungeeCord: no dependen de la versión de Minecraft.
+    proxy {
+        java.srcDirs = [new File(sharedSrc, 'proxy/java')]
+        resources.srcDirs = [new File(sharedSrc, 'proxy/resources')]
+        compileClasspath += sourceSets.main.output
+    }
+    // NeoForge 21.1 y Forge 52 usan los nombres de Mojang, igual que el Minecraft de
+    // Loom con officialMojangMappings(): se compilan contra él más la API de cada uno.
+    neoforge {
+        compileClasspath += sourceSets.main.output + sourceSets.client.output + sourceSets.client.compileClasspath
+    }
+    forge {
+        compileClasspath += sourceSets.main.output + sourceSets.client.output + sourceSets.client.compileClasspath
+    }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings loom.officialMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+    // API de permisos de Fabric para 1.21.1 (la de LuckPerms). Va dentro del jar de Fabric.
+    modImplementation include("me.lucko:fabric-permissions-api:${project.fabric_permissions_api_version}")
+
+    bukkitCompileOnly "io.papermc.paper:paper-api:${project.paper_api_version}"
+
+    neoforgeCompileOnly("net.neoforged:neoforge:${project.neoforge_version}:universal") { transitive = false }
+    neoforgeCompileOnly("net.neoforged.fancymodloader:loader:${project.neoforge_fml_version}") { transitive = false }
+    neoforgeCompileOnly("net.neoforged:bus:${project.neoforge_bus_version}") { transitive = false }
+    neoforgeCompileOnly("net.neoforged:mergetool:${project.neoforge_mergetool_version}:api") { transitive = false }
+
+    def forgeFull = "${project.minecraft_version}-${project.forge_version}"
+    forgeCompileOnly("net.minecraftforge:forge:${forgeFull}:universal") { transitive = false }
+    forgeCompileOnly("net.minecraftforge:fmlloader:${forgeFull}") { transitive = false }
+    forgeCompileOnly("net.minecraftforge:fmlcore:${forgeFull}") { transitive = false }
+    forgeCompileOnly("net.minecraftforge:javafmllanguage:${forgeFull}") { transitive = false }
+    forgeCompileOnly("net.minecraftforge:eventbus:${project.forge_eventbus_version}") { transitive = false }
+    forgeCompileOnly("net.minecraftforge:mergetool-api:${project.forge_mergetool_version}") { transitive = false }
+
+    proxyCompileOnly "com.velocitypowered:velocity-api:${project.velocity_api_version}"
+    proxyCompileOnly "net.md-5:bungeecord-api:${project.bungeecord_api_version}"
+    proxyCompileOnly "org.slf4j:slf4j-api:2.0.17"
+}
+
+// --- Recursos ---
+
+processResources {
+    dependsOn 'copyNative'
+    inputs.property 'version', project.version
+    filesMatching(['fabric.mod.json', 'ferrovoz/version.txt']) {
+        expand 'version': inputs.properties.version
+    }
+}
+
+processNeoforgeResources {
+    inputs.property 'version', project.version
+    filesMatching('META-INF/neoforge.mods.toml') {
+        expand 'version': inputs.properties.version
+    }
+}
+
+processForgeResources {
+    inputs.property 'version', project.version
+    filesMatching('META-INF/mods.toml') {
+        expand 'version': inputs.properties.version
+    }
+}
+
+processProxyResources {
+    inputs.property 'version', project.version
+    filesMatching(['velocity-plugin.json', 'bungee.yml']) {
+        expand 'version': inputs.properties.version
+    }
+}
+
+processBukkitResources {
+    inputs.property 'version', project.version
+    filesMatching('plugin.yml') {
+        expand 'version': inputs.properties.version
+        // Paper 1.21.1 no carga plugins con un api-version más nuevo que él.
+        filter { String line -> line.startsWith('api-version:') ? "api-version: '1.21'" : line }
+    }
+}
+
+// --- Núcleo en Rust (el mismo que ../mod) ---
+// Compila ../native para la plataforma actual. Los binarios de las demás plataformas
+// se leen de ../mod/natives-prebuilt/natives/<plataforma>/ (los mismos que usa la 26.3).
+// -PskipNative para no llamar a cargo.
+
+def nativeDir = file('../native')
+def generatedNatives = layout.buildDirectory.dir('generated/natives')
+
+static String hostPlatform() {
+    def os = System.getProperty('os.name').toLowerCase()
+    def arch = System.getProperty('os.arch').toLowerCase()
+    def o = os.contains('win') ? 'windows' : os.contains('mac') ? 'macos' : 'linux'
+    def a = (arch in ['amd64', 'x86_64']) ? 'x86_64' : (arch in ['aarch64', 'arm64']) ? 'aarch64' : arch
+    return "${o}-${a}"
+}
+
+tasks.register('cargoBuild', Exec) {
+    description = 'Compila el núcleo Rust en modo release'
+    workingDir nativeDir
+    commandLine 'cargo', 'build', '--release'
+    inputs.dir(new File(nativeDir, 'src'))
+    inputs.file(new File(nativeDir, 'Cargo.toml'))
+    outputs.dir(new File(nativeDir, 'target/release'))
+    onlyIf { !project.hasProperty('skipNative') }
+}
+
+tasks.register('cargoBuildServer', Exec) {
+    description = 'Compila el núcleo Rust sin audio para servidores dedicados'
+    workingDir nativeDir
+    commandLine 'cargo', 'build', '--release', '--no-default-features', '--target-dir', 'target/server'
+    inputs.dir(new File(nativeDir, 'src'))
+    inputs.file(new File(nativeDir, 'Cargo.toml'))
+    outputs.dir(new File(nativeDir, 'target/server/release'))
+    onlyIf { !project.hasProperty('skipNative') }
+}
+
+tasks.register('copyNative', Copy) {
+    dependsOn 'cargoBuild', 'cargoBuildServer'
+    onlyIf { !project.hasProperty('skipNative') }
+    def libName = System.mapLibraryName('ferrovoz')
+    def serverLibName = System.mapLibraryName('ferrovoz_server')
+    from(new File(nativeDir, "target/release/${libName}"))
+    from(new File(nativeDir, "target/server/release/${libName}")) {
+        rename { serverLibName }
+    }
+    into(generatedNatives.map { it.dir("natives/${hostPlatform()}") })
+}
+
+sourceSets.main.resources.srcDir(generatedNatives)
+sourceSets.main.resources.srcDir(file('../mod/natives-prebuilt'))
+
+// --- Jars ---
+// jar y remapJar son pasos intermedios (van a build/intermediate); los jars para
+// publicar son fabricJar y neoforgeJar.
+
+def finalName = { String loader -> "ferrovoz-${project.minecraft_version}-${project.version}-${loader}.jar".toString() }
+
+jar {
+    destinationDirectory = layout.buildDirectory.dir('intermediate')
+}
+
+remapJar {
+    destinationDirectory = layout.buildDirectory.dir('intermediate')
+}
+
+def commonJarSetup = { Jar t ->
+    t.group = 'build'
+    t.duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    t.from(sourceSets.bukkit.output)
+    t.from(sourceSets.proxy.output)
+    t.from('../LICENSE') {
+        rename { "${it}_${project.base.archivesName.get()}" }
+    }
+    t.manifest {
+        // El plugin de Paper no toca clases internas del servidor: no hace falta remapearlo.
+        attributes 'paperweight-mappings-namespace': 'mojang'
+    }
+    t.destinationDirectory = layout.buildDirectory.dir('libs')
+}
+
+// Fabric: clases remapeadas a intermediary (lo que hace remapJar) + Paper + proxy.
+tasks.register('fabricJar', Jar) {
+    description = 'Jar de Fabric (y Paper/proxy) para Minecraft 1.21.1'
+    dependsOn remapJar
+    commonJarSetup(it)
+    from(zipTree(remapJar.archiveFile)) {
+        exclude 'META-INF/MANIFEST.MF'
+    }
+    archiveFileName = finalName('fabric')
+}
+
+// NeoForge y Forge: las clases tal cual (nombres de Mojang), sin las de Fabric.
+tasks.register('neoforgeJar', Jar) {
+    description = 'Jar de NeoForge y Forge (y Paper/proxy) para Minecraft 1.21.1'
+    commonJarSetup(it)
+    from(sourceSets.main.output)
+    from(sourceSets.client.output)
+    from(sourceSets.neoforge.output)
+    from(sourceSets.forge.output)
+    exclude 'fabric.mod.json', 'dev/ferrovoz/fabric/**'
+    archiveFileName = finalName('neoforge')
+}
+
+tasks.named('assemble') {
+    dependsOn 'fabricJar', 'neoforgeJar'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.release = 21
+    it.options.encoding = 'UTF-8'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
