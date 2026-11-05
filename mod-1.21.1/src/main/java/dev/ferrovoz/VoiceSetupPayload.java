@@ -1,5 +1,6 @@
 package dev.ferrovoz;
 
+import io.netty.buffer.ByteBuf;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
@@ -29,13 +30,29 @@ public record VoiceSetupPayload(String host, int port, byte[] key, int transport
     public static final int PROTOCOL = Protocol.VERSION;
     public static final ResourceLocation ID = ResourceLocation.fromNamespaceAndPath(Protocol.NAMESPACE, Protocol.PATH);
     public static final CustomPacketPayload.Type<VoiceSetupPayload> TYPE = new CustomPacketPayload.Type<>(ID);
+    /**
+     * long en 8 bytes big endian. En 1.21.1 no existe {@code ByteBufCodecs.LONG}, y
+     * {@code VAR_LONG} no vale: Paper y Forge lo envían con 8 bytes fijos.
+     */
+    private static final StreamCodec<ByteBuf, Long> LONG = new StreamCodec<>() {
+        @Override
+        public Long decode(ByteBuf buf) {
+            return buf.readLong();
+        }
+
+        @Override
+        public void encode(ByteBuf buf, Long value) {
+            buf.writeLong(value);
+        }
+    };
+
     public static final StreamCodec<RegistryFriendlyByteBuf, VoiceSetupPayload> CODEC = StreamCodec.composite(
             ByteBufCodecs.STRING_UTF8, VoiceSetupPayload::host,
             ByteBufCodecs.VAR_INT, VoiceSetupPayload::port,
             ByteBufCodecs.BYTE_ARRAY, VoiceSetupPayload::key,
             ByteBufCodecs.VAR_INT, VoiceSetupPayload::transport,
-            ByteBufCodecs.LONG, VoiceSetupPayload::idMsb,
-            ByteBufCodecs.LONG, VoiceSetupPayload::idLsb,
+            LONG, VoiceSetupPayload::idMsb,
+            LONG, VoiceSetupPayload::idLsb,
             VoiceSetupPayload::new);
 
     @Override
