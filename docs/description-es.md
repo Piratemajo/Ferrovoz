@@ -90,7 +90,7 @@ Funciona como mod de **Fabric, NeoForge y Forge**, como plugin de **Paper, Purpu
 | Cliente o servidor | **NeoForge** 21.1 | `-neoforge` | `mods/` | - |
 | Cliente o servidor | **Forge** 52 | `-neoforge` | `mods/` | - |
 | Servidor | **Paper / Purpur / Folia / Spigot** 1.21.1 | cualquiera | `plugins/` | - |
-| Proxy | **Velocity** / **BungeeCord** | cualquiera | `plugins/` | Java 21 |
+| Proxy | **Velocity** 3.4+ / **BungeeCord** | cualquiera | `plugins/` | Java 21 |
 
 1. Instala Ferrovoz en el **servidor** y en cada **jugador**.
 2. Abre el **puerto UDP 24454** en el servidor (se cambia en `ferrovoz.properties`). Si no puedes, la voz funciona igual por la conexión del juego.

@@ -90,7 +90,7 @@ It runs as a mod on **Fabric, NeoForge and Forge**, as a plugin on **Paper, Purp
 | Client or server | **NeoForge** 21.1 | `-neoforge` | `mods/` | - |
 | Client or server | **Forge** 52 | `-neoforge` | `mods/` | - |
 | Server | **Paper / Purpur / Folia / Spigot** 1.21.1 | either | `plugins/` | - |
-| Proxy | **Velocity** / **BungeeCord** | either | `plugins/` | Java 21 |
+| Proxy | **Velocity** 3.4+ / **BungeeCord** | either | `plugins/` | Java 21 |
 
 1. Install Ferrovoz on the **server** and on every **player**.
 2. Open **UDP port 24454** on the server (configurable in `ferrovoz.properties`). If you can't, voice still works through the game connection.
