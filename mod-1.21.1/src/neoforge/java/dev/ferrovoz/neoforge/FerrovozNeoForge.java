@@ -6,6 +6,7 @@ import dev.ferrovoz.VoiceCommands;
 import dev.ferrovoz.VoiceSetupPayload;
 import dev.ferrovoz.VoiceTunnelPayload;
 import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.network.protocol.PacketFlow;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.api.distmarker.Dist;
@@ -90,13 +91,17 @@ public final class FerrovozNeoForge implements Ferrovoz.Platform {
                 (payload, ctx) -> FerrovozNeoForgeClient.onSetup(payload));
         registrar.playToClient(VersionPayload.TYPE, VersionPayload.CODEC,
                 (payload, ctx) -> FerrovozNeoForgeClient.onVersion(payload));
-        // El túnel se atiende en el hilo de red, sin esperar al tick.
+        // El túnel se atiende en el hilo de red, sin esperar al tick. En 21.1 hay un
+        // solo handler para los dos sentidos.
         event.registrar("1").optional().executesOn(HandlerThread.NETWORK).playBidirectional(
                 VoiceTunnelPayload.TYPE, VoiceTunnelPayload.CODEC,
                 (payload, ctx) -> {
-                    if (ctx.player() instanceof ServerPlayer p) Ferrovoz.onTunnel(p, payload.data());
-                },
-                (payload, ctx) -> FerrovozNeoForgeClient.onTunnel(payload.data()));
+                    if (ctx.flow() == PacketFlow.SERVERBOUND) {
+                        if (ctx.player() instanceof ServerPlayer p) Ferrovoz.onTunnel(p, payload.data());
+                    } else {
+                        FerrovozNeoForgeClient.onTunnel(payload.data());
+                    }
+                });
     }
 
     // --- Ferrovoz.Platform ---
