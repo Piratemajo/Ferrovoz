@@ -88,7 +88,7 @@ repositories {
 // tal cual; el resto de ../mod/src se ignora porque aquí está su versión 1.21.1.
 def SHARED_MAIN = [
         'FerrovozConfig', 'FerrovozLog', 'FerrovozNative', 'Messages', 'Protocol', 'SetupMessage',
-        'SoundGeometry', 'TunnelPump', 'VoiceCommands', 'WallTracer',
+        'SoundGeometry', 'TunnelPump', 'VoiceCommands', 'WallScheduler', 'WallTracer',
 ].collect { "dev/ferrovoz/${it}.java".toString() }
 def SHARED_CLIENT = [
         'ClientConfig', 'ReplayAudioOut', 'ReplayCompat', 'VoiceSlider',

@@ -1,9 +1,9 @@
 //! Prueba de carga del relé: 50-100 clientes falsos por UDP real.
 //!
 //! Cada cliente es un socket que hace lo mismo que el mod a nivel de red (Hello y
-//! una trama cifrada cada 20 ms) sin micro ni Opus real: el servidor no decodifica,
-//! así que le da igual. Mide CPU del hilo del relé, paquetes por segundo, voz
-//! entregada y memoria.
+//! una trama cifrada cada 20 ms con Opus de verdad, que el servidor decodifica si
+//! hay multitud). Mide la CPU de todos los hilos del relé, paquetes por segundo,
+//! voz entregada y memoria.
 //!
 //! No corre con `cargo test` normal (tarda ~40 s):
 //!
@@ -11,7 +11,8 @@
 //! cargo test --release --test load -- --ignored --nocapture
 //! ```
 
-use ferrovoz::protocol::{self, AudioUp, Environment, PacketType, TalkMode};
+use ferrovoz::codec::VoiceEncoder;
+use ferrovoz::protocol::{self, AudioUp, Environment, PacketType, TalkMode, FRAME_SAMPLES};
 use ferrovoz::server::VoiceServer;
 use std::net::UdpSocket;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -20,8 +21,6 @@ use std::time::{Duration, Instant};
 
 const FRAME: Duration = Duration::from_millis(20);
 const RANGE: f32 = 48.0;
-/// ~24 kbps de Opus, como el mod con buena red.
-const OPUS_BYTES: usize = 60;
 const MEASURE: Duration = Duration::from_secs(5);
 
 struct FakeClient {
@@ -44,13 +43,15 @@ struct Report {
     rss_mb: Option<f64>,
 }
 
-/// Tiempo de CPU (s) del hilo del relé según /proc (solo Linux). Más exacto que
-/// `busy_ns`, que también cuenta el tiempo esperando CPU con la máquina cargada.
+/// Tiempo de CPU (s) de los hilos del relé (recepción, envío y multitudes) según
+/// /proc (solo Linux). Más exacto que `busy_ns`, que también cuenta el tiempo
+/// esperando CPU con la máquina cargada.
 fn relay_cpu_seconds() -> Option<f64> {
+    let mut total = None;
     for task in std::fs::read_dir("/proc/self/task").ok()? {
         let dir = task.ok()?.path();
         let comm = std::fs::read_to_string(dir.join("comm")).unwrap_or_default();
-        if comm.trim() != "ferrovoz-server" {
+        if !comm.trim().starts_with("ferrovoz-") {
             continue;
         }
         let stat = std::fs::read_to_string(dir.join("stat")).ok()?;
@@ -58,9 +59,16 @@ fn relay_cpu_seconds() -> Option<f64> {
         let rest = &stat[stat.rfind(')')? + 2..];
         let f: Vec<&str> = rest.split_whitespace().collect();
         let ticks: f64 = f.get(11)?.parse::<f64>().ok()? + f.get(12)?.parse::<f64>().ok()?;
-        return Some(ticks / 100.0); // USER_HZ = 100 en Linux
+        *total.get_or_insert(0.0) += ticks / 100.0; // USER_HZ = 100 en Linux
     }
-    None
+    total
+}
+
+/// Una trama de Opus de verdad (un tono), como la que manda el mod.
+fn opus_frame() -> Vec<u8> {
+    let mut enc = VoiceEncoder::new(32_000).unwrap();
+    let pcm: Vec<f32> = (0..FRAME_SAMPLES).map(|i| 0.3 * (i as f32 * 0.04).sin()).collect();
+    enc.encode(&pcm).unwrap().to_vec()
 }
 
 /// Memoria residente del proceso (solo Linux).
@@ -72,7 +80,13 @@ fn rss_mb() -> Option<f64> {
 }
 
 fn run(name: &'static str, positions: Vec<[f64; 3]>, talking: impl Fn(usize) -> bool) -> Report {
+    run_with(name, positions, talking, 0)
+}
+
+/// Con `max_voices` > 0 la entrega esperada no se calcula (depende de las zonas).
+fn run_with(name: &'static str, positions: Vec<[f64; 3]>, talking: impl Fn(usize) -> bool, max_voices: usize) -> Report {
     let stop = Arc::new(AtomicBool::new(false));
+    let opus = opus_frame();
 
     // Primero los clientes, para que la memoria medida después sea la del servidor.
     let mut clients = Vec::new();
@@ -109,6 +123,7 @@ fn run(name: &'static str, positions: Vec<[f64; 3]>, talking: impl Fn(usize) -> 
     let rss_before = rss_mb();
 
     let server = VoiceServer::start("127.0.0.1:0".parse().unwrap(), RANGE).unwrap();
+    server.set_max_voices(max_voices);
     let addr = server.local_addr().unwrap();
     let mut keys = Vec::new();
     for c in &clients {
@@ -142,7 +157,7 @@ fn run(name: &'static str, positions: Vec<[f64; 3]>, talking: impl Fn(usize) -> 
     let mut seq = 0u32;
     let mut send_frame = |seq: &mut u32| {
         for &i in &talkers {
-            let body = AudioUp { seq: *seq, talk: TalkMode::Normal, env: Environment::default(), opus: vec![0x5A; OPUS_BYTES] }
+            let body = AudioUp { seq: *seq, talk: TalkMode::Normal, env: Environment::default(), opus: opus.clone() }
                 .encode();
             let pkt = protocol::seal(&keys[i], PacketType::AudioUp, Some(&clients[i].id), &body, counters[i]);
             counters[i] += 1;
@@ -185,6 +200,17 @@ fn run(name: &'static str, positions: Vec<[f64; 3]>, talking: impl Fn(usize) -> 
     let pout = st.packets_out.load(Ordering::Relaxed) - out0;
     let recv: u64 = clients.iter().map(|c| c.received.load(Ordering::Relaxed)).sum::<u64>() - recv0;
     let rss_after = rss_mb();
+    if std::env::var("FERROVOZ_THREADS").is_ok() {
+        for task in std::fs::read_dir("/proc/self/task").unwrap() {
+            let dir = task.unwrap().path();
+            let comm = std::fs::read_to_string(dir.join("comm")).unwrap_or_default();
+            let stat = std::fs::read_to_string(dir.join("stat")).unwrap_or_default();
+            let rest = &stat[stat.rfind(')').unwrap_or(0) + 2..];
+            let f: Vec<&str> = rest.split_whitespace().collect();
+            let t: f64 = f.get(11).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0) + f.get(12).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
+            if t > 50.0 { eprintln!("  hilo {:<18} {:.1} s", comm.trim(), t / 100.0); }
+        }
+    }
 
     stop.store(true, Ordering::Relaxed);
     for r in receivers {
@@ -200,7 +226,13 @@ fn run(name: &'static str, positions: Vec<[f64; 3]>, talking: impl Fn(usize) -> 
         cpu_percent: 100.0 * busy / wall,
         in_per_s: pin as f64 / wall,
         out_per_s: pout as f64 / wall,
-        delivered_percent: if expected == 0 { 100.0 } else { 100.0 * recv as f64 / expected as f64 },
+        delivered_percent: if max_voices > 0 {
+            f64::NAN
+        } else if expected == 0 {
+            100.0
+        } else {
+            100.0 * recv as f64 / expected as f64
+        },
         us_per_packet: if pout == 0 { 0.0 } else { busy * 1e6 / (pin + pout) as f64 },
         rss_mb: rss_before.zip(rss_after).map(|(a, b)| (b - a).max(0.0)),
     }
@@ -211,21 +243,27 @@ fn clusters(n: usize) -> Vec<[f64; 3]> {
     (0..n).map(|i| [(i / 5) as f64 * 300.0 + (i % 5) as f64 * 3.0, 64.0, 0.0]).collect()
 }
 
+/// `n` jugadores en un evento: una plaza de 40x40, a 2,5 bloques unos de otros.
+fn event(n: usize) -> Vec<[f64; 3]> {
+    (0..n).map(|i| [(i % 16) as f64 * 2.5, 64.0, (i / 16) as f64 * 2.5]).collect()
+}
+
 /// `n` jugadores juntos (una plaza de 20x20).
 fn crowd(n: usize) -> Vec<[f64; 3]> {
     (0..n).map(|i| [(i % 10) as f64 * 2.0, 64.0, (i / 10) as f64 * 2.0]).collect()
 }
 
 fn print(r: &Report) {
+    let delivered = if r.delivered_percent.is_nan() { "-".to_string() } else { format!("{:.1} %", r.delivered_percent) };
     println!(
-        "{:<38} {:>4} {:>4} {:>7.1} % {:>8.0} {:>9.0} {:>7.1} % {:>6.2} µs {:>8}",
+        "{:<38} {:>4} {:>4} {:>7.1} % {:>8.0} {:>9.0} {:>9} {:>6.2} µs {:>8}",
         r.name,
         r.players,
         r.talkers,
         r.cpu_percent,
         r.in_per_s,
         r.out_per_s,
-        r.delivered_percent,
+        delivered,
         r.us_per_packet,
         r.rss_mb.map_or("n/d".to_string(), |m| format!("{m:.1} MB")),
     );
@@ -271,4 +309,27 @@ fn relay_handles_100_players() {
         assert!(r.delivered_percent >= 95.0, "{}: solo llega el {:.1} % de la voz", r.name, r.delivered_percent);
     }
     assert!(reports[0].cpu_percent < 25.0, "100 jugadores repartidos no deberían costar ni un cuarto de núcleo");
+}
+
+/// Evento de 250 personas juntas con 150 hablando a la vez, sin límite de voces y
+/// con el límite por defecto (24 por zona más el murmullo).
+#[test]
+#[ignore = "prueba de carga: cargo test --release --test load -- --ignored --nocapture"]
+fn relay_handles_a_250_player_event() {
+    let reports = vec![
+        run_with("evento 250, 150 hablando, sin límite", event(250), |i| i % 5 < 3, 0),
+        run_with("evento 250, 150 hablando, max_voices=24", event(250), |i| i % 5 < 3, 24),
+    ];
+    println!();
+    println!(
+        "{:<38} {:>4} {:>4} {:>9} {:>8} {:>9} {:>9} {:>9} {:>8}",
+        "escenario", "jug", "hab", "CPU relé", "in/s", "out/s", "entrega", "coste", "memoria"
+    );
+    for r in &reports {
+        print(r);
+    }
+    // Con el límite cada oyente recibe como mucho 24 voces más el murmullo.
+    let cap = 250.0 * 25.0 * 50.0;
+    assert!(reports[1].out_per_s <= cap * 1.1, "se pasa del techo: {:.0} > {cap:.0}", reports[1].out_per_s);
+    assert!(reports[1].in_per_s > reports[0].in_per_s, "con el límite el relé debe dar abasto");
 }

@@ -5,6 +5,11 @@ sección de esa versión como notas de la release.
 
 ## [Sin publicar]
 
+- **Multitudes y eventos**: si a una zona le llegan más voces de las que se pueden distinguir (`max_voices` en `ferrovoz.properties`, 24 por defecto), sus jugadores reciben por separado las más cercanas y el resto **mezclado en el servidor como el murmullo de la multitud**, que suena desde donde está la gente. Nadie desaparece y el servidor aguanta: en una prueba con 250 personas juntas y 150 hablando, sin límite el relé solo entregaba el 31 % de la voz; con el límite la recibe toda y envía 24 voces y el murmullo a cada uno. Con menos voces que el límite no cambia nada. Funciona con clientes de cualquier versión (los anteriores a esta muestran el murmullo en el HUD como un hablante más).
+- **Prioridad para el anfitrión** (`ferrovoz.priority`, por defecto operadores): su voz llega siempre por separado, aunque hable toda la plaza.
+- **Paredes del servidor con coste fijo**: como mucho 300 cálculos por tick, las parejas más cercanas primero, y sin recalcular si nadie se ha movido de bloque. Con 250 personas juntas y 100 hablando pasa de 2,9 ms por tick (con picos de 24 ms) a 0,2 ms (picos de 2 ms).
+- El relé monta cada trama de voz una vez y solo cambia lo de cada oyente: el caso extremo de 100 personas juntas hablando todas pasa del 94 % al 100 % de voz entregada.
+
 - **Retraso de la voz según la red de cada uno**: el colchón antes de reproducir cada frase ya no es fijo (60 ms), se ajusta a la conexión de quien habla. Con buena red baja a 40 ms (la conversación se siente más inmediata) y con Wi-Fi malo o datos móviles sube lo necesario, hasta 160 ms, para que la voz no se corte. Si un paquete llega tarde a media frase se espera por él en vez de tirarlo. En una red simulada muy inestable los cortes bajan del 14 % al 0 %. Solo cambia el cliente: funciona con servidores de cualquier versión.
 
 ## [0.11.0]

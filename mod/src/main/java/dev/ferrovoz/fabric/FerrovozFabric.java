@@ -99,14 +99,14 @@ public final class FerrovozFabric implements ModInitializer, Ferrovoz.Platform {
     /** Valor por defecto: la moderación solo para operadores; lo demás, para todos. */
     @Override
     public boolean hasPermission(ServerPlayer player, String node) {
-        return VoiceCommands.PERM_ADMIN.equals(node)
+        return VoiceCommands.opByDefault(node)
                 ? player.checkPermission(permission(node), PermissionLevel.ADMINS)
                 : player.checkPermission(permission(node), true);
     }
 
     @Override
     public boolean hasPermission(CommandSourceStack source, String node) {
-        return VoiceCommands.PERM_ADMIN.equals(node)
+        return VoiceCommands.opByDefault(node)
                 ? source.checkPermission(permission(node), PermissionLevel.ADMINS)
                 : source.checkPermission(permission(node), true);
     }

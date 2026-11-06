@@ -9,6 +9,7 @@
 pub mod client;
 pub mod forwarder;
 pub mod codec;
+pub mod crowd;
 pub mod denoise;
 pub mod jitter;
 pub mod protocol;
@@ -765,6 +766,28 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverSetPermissions(
     })
 }
 
+/// Voz del anfitrión: siempre por separado, aunque haya multitud.
+#[no_mangle]
+pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverSetPriority(
+    _: JNIEnv, _: JClass, h: jlong, msb: jlong, lsb: jlong, priority: jboolean,
+) {
+    guard((), || {
+        if let Some(s) = server(h) {
+            s.set_priority(&protocol::uuid_from_java(msb, lsb), priority != 0);
+        }
+    })
+}
+
+/// Voces por separado como mucho en cada zona; las demás van al murmullo (0 = sin límite).
+#[no_mangle]
+pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverSetMaxVoices(_: JNIEnv, _: JClass, h: jlong, max: jint) {
+    guard((), || {
+        if let Some(s) = server(h) {
+            s.set_max_voices(max.max(0) as usize);
+        }
+    })
+}
+
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverIsMuted(_: JNIEnv, _: JClass, h: jlong, msb: jlong, lsb: jlong) -> jboolean {
     jbool(guard(false, || server(h).is_some_and(|s| s.is_muted(&protocol::uuid_from_java(msb, lsb)))))
@@ -1021,6 +1044,32 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverSetOcclusion(
         if let Some(s) = server(h) {
             s.set_occlusion(&protocol::uuid_from_java(s_msb, s_lsb), &protocol::uuid_from_java(l_msb, l_lsb), amount);
         }
+    })
+}
+
+/// Varias oclusiones de golpe: `pairs` = [hablante msb, lsb, oyente msb, lsb, ...]
+/// y `amounts` una por pareja.
+#[no_mangle]
+pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverSetOcclusions(
+    env: JNIEnv, _: JClass, h: jlong, pairs: JLongArray, amounts: JFloatArray,
+) {
+    guard((), || {
+        let Some(s) = server(h) else { return };
+        let n = env.get_array_length(&amounts).unwrap_or(0).max(0) as usize;
+        if n == 0 || env.get_array_length(&pairs).unwrap_or(0).max(0) as usize != n * 4 {
+            return;
+        }
+        let mut ids = vec![0 as jlong; n * 4];
+        let mut values = vec![0 as jfloat; n];
+        if env.get_long_array_region(&pairs, 0, &mut ids).is_err() || env.get_float_array_region(&amounts, 0, &mut values).is_err() {
+            return;
+        }
+        let batch: Vec<(protocol::PlayerId, protocol::PlayerId, f32)> = ids
+            .chunks_exact(4)
+            .zip(values)
+            .map(|(q, v)| (protocol::uuid_from_java(q[0], q[1]), protocol::uuid_from_java(q[2], q[3]), v))
+            .collect();
+        s.set_occlusions(&batch);
     })
 }
 

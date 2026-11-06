@@ -6,6 +6,7 @@ import dev.ferrovoz.Protocol;
 import dev.ferrovoz.SetupMessage;
 import dev.ferrovoz.TunnelPump;
 import dev.ferrovoz.VoiceCommands;
+import dev.ferrovoz.WallScheduler;
 import dev.ferrovoz.WallTracer;
 import org.bukkit.World;
 import org.bukkit.Bukkit;
@@ -44,6 +45,7 @@ public final class FerrovozPlugin extends JavaPlugin implements Listener {
     private static final int PERMISSION_REFRESH_TICKS = 100;
     /** Jugadores con voz (túnel, avisos de grupo, oclusión). */
     private final java.util.Map<UUID, Player> online = new ConcurrentHashMap<>();
+    private final WallScheduler walls = new WallScheduler();
     private TunnelPump tunnel;
     private java.util.concurrent.ScheduledExecutorService events;
 
@@ -87,6 +89,7 @@ public final class FerrovozPlugin extends JavaPlugin implements Listener {
         }
         FerrovozNative.serverSetRanges(server, config.maxDistance, config.whisperDistance, config.shoutDistance);
         FerrovozNative.serverSetRoleRules(server, config.spectators, config.dead);
+        FerrovozNative.serverSetMaxVoices(server, config.maxVoices);
         // Silencios y grupos permanentes.
         FerrovozNative.serverSetDataFile(server, getDataFolder().toPath().resolve("data.txt").toAbsolutePath().toString());
 
@@ -119,7 +122,7 @@ public final class FerrovozPlugin extends JavaPlugin implements Listener {
         // Oclusión con el mundo del servidor. En Folia no: leer bloques de otra región no
         // es seguro, así que allí solo la calcula el cliente.
         if (!PlayerScheduling.isFolia()) {
-            Bukkit.getScheduler().runTaskTimer(this, this::updateWalls, 4L, 4L);
+            Bukkit.getScheduler().runTaskTimer(this, this::updateWalls, 1L, 1L);
         }
 
         // Por si se habilita con jugadores conectados.
@@ -180,32 +183,31 @@ public final class FerrovozPlugin extends JavaPlugin implements Listener {
     }
 
     /** Oclusión entre cada pareja activa (solo chunks cargados; nunca carga ninguno). */
+    /** Paredes calculadas en el servidor, con un coste fijo por tick. */
     private void updateWalls() {
         long s = server;
         if (s == 0) return;
-        long[] pairs = FerrovozNative.serverActivePairs(s);
-        for (int i = 0; pairs != null && i + 3 < pairs.length; i += 4) {
-            Player speaker = online.get(new UUID(pairs[i], pairs[i + 1]));
-            Player listener = online.get(new UUID(pairs[i + 2], pairs[i + 3]));
-            if (speaker == null || listener == null) continue;
-            Location a = speaker.getEyeLocation(), b = listener.getEyeLocation();
-            World world = a.getWorld();
-            if (world == null || !world.equals(b.getWorld())) continue;
-            float occ = WallTracer.occlusion(new WallTracer.BlockProbe() {
-                @Override
-                public boolean isChunkLoaded(int cx, int cz) {
-                    return world.isChunkLoaded(cx, cz);
-                }
+        walls.tick(s, this::eye);
+    }
 
-                @Override
-                public boolean isSolid(int x, int y, int z) {
-                    return world.getBlockAt(x, y, z).getType().isOccluding();
-                }
-            }, a.getX(), a.getY(), a.getZ(), b.getX(), b.getY(), b.getZ());
-            if (occ != WallTracer.UNKNOWN) {
-                FerrovozNative.serverSetOcclusion(s, pairs[i], pairs[i + 1], pairs[i + 2], pairs[i + 3], occ);
+    /** Ojos de un jugador con voz y cómo mirar los bloques de su mundo (solo chunks cargados). */
+    private WallScheduler.Eye eye(UUID id) {
+        Player p = online.get(id);
+        if (p == null) return null;
+        Location eye = p.getEyeLocation();
+        World world = eye.getWorld();
+        if (world == null) return null;
+        return new WallScheduler.Eye(world, eye.getX(), eye.getY(), eye.getZ(), new WallTracer.BlockProbe() {
+            @Override
+            public boolean isChunkLoaded(int cx, int cz) {
+                return world.isChunkLoaded(cx, cz);
             }
-        }
+
+            @Override
+            public boolean isSolid(int x, int y, int z) {
+                return world.getBlockAt(x, y, z).getType().isOccluding();
+            }
+        });
     }
 
     /**
@@ -297,6 +299,8 @@ public final class FerrovozPlugin extends JavaPlugin implements Listener {
         FerrovozNative.serverSetPermissions(s, id.getMostSignificantBits(), id.getLeastSignificantBits(),
                 p.hasPermission(BukkitVoiceCommands.node(VoiceCommands.PERM_SPEAK)),
                 p.hasPermission(BukkitVoiceCommands.node(VoiceCommands.PERM_SHOUT)));
+        FerrovozNative.serverSetPriority(s, id.getMostSignificantBits(), id.getLeastSignificantBits(),
+                p.hasPermission(BukkitVoiceCommands.node(VoiceCommands.PERM_PRIORITY)));
     }
 
     /**

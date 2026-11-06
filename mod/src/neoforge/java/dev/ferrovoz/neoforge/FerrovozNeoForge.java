@@ -54,6 +54,9 @@ public final class FerrovozNeoForge implements Ferrovoz.Platform {
         // Moderación: por defecto solo operadores (nivel 3, como en Fabric).
         NODES.put(VoiceCommands.PERM_ADMIN, new PermissionNode<>(Ferrovoz.MOD_ID, VoiceCommands.PERM_ADMIN, PermissionTypes.BOOLEAN,
                 (player, uuid, ctx) -> player != null && Commands.LEVEL_ADMINS.check(player.permissions())));
+        // Prioridad en multitudes (anfitrión de un evento): por defecto, operadores.
+        NODES.put(VoiceCommands.PERM_PRIORITY, new PermissionNode<>(Ferrovoz.MOD_ID, VoiceCommands.PERM_PRIORITY, PermissionTypes.BOOLEAN,
+                (player, uuid, ctx) -> player != null && Commands.LEVEL_ADMINS.check(player.permissions())));
     }
 
     public FerrovozNeoForge(IEventBus modBus, ModContainer container, Dist dist) {
@@ -147,6 +150,6 @@ public final class FerrovozNeoForge implements Ferrovoz.Platform {
         ServerPlayer player = source.getPlayer();
         if (player != null) return hasPermission(player, node);
         // Consola o bloque de comandos: según su nivel de permisos.
-        return !VoiceCommands.PERM_ADMIN.equals(node) || Commands.LEVEL_ADMINS.check(source.permissions());
+        return !VoiceCommands.opByDefault(node) || Commands.LEVEL_ADMINS.check(source.permissions());
     }
 }

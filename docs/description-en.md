@@ -54,6 +54,7 @@ It runs as a mod on **Fabric, NeoForge and Forge**, as a plugin on **Paper, Purp
   | `ferrovoz.shout` | everyone | shout (without it, shouting is normal voice) |
   | `ferrovoz.groups` | everyone | use groups |
   | `ferrovoz.admin` | operators | `/voice status`, mute, and manage any group |
+  | `ferrovoz.priority` | operators | always heard in a crowd (whoever hosts an event) |
 
 - **No open port? No problem.** If UDP can't get through, voice automatically goes through the game connection.
 - **Proxy support**: on Velocity or BungeeCord, a single public UDP port on the proxy forwards voice to every backend server. Switching servers just works.
@@ -66,7 +67,7 @@ It runs as a mod on **Fabric, NeoForge and Forge**, as a plugin on **Paper, Purp
 - **Encrypted voice** (ChaCha20-Poly1305, one key per player) with **anti-replay** protection and per-player rate limiting.
 - **Opus** codec with automatic quality: 32 kbps on a good connection, down to 14 kbps with extra protection when packets are being lost.
 - **Measured on a real Fabric server** with 100 players in the same spot and 20 talking at once: Ferrovoz added **0.57 ms per tick on average** (about 1% of the tick budget), the server stayed at **20 TPS**, and **99.9%** of voice packets were delivered.
-- **Ready for big events**: the relay spreads voice across CPU cores and sends in batches; on 2 cores it handles 100 players in one spot all talking at once (465,000 packets/s).
+- **Ready for big events**: when more than 24 voices reach an area at once (`max_voices`), each player hears the closest ones separately and the rest as the **murmur of the crowd**, mixed on the server. Nobody disappears and the server keeps up: in a test with 250 people together and 150 talking, only 31% of the voice got through without it; with it, all of it. Whoever hosts the event (`ferrovoz.priority`) is always heard.
 
 ---
 

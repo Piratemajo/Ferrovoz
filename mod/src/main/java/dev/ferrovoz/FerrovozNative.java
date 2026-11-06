@@ -257,6 +257,12 @@ public final class FerrovozNative {
     public static native byte[][] serverPollTunnel(long handle, long uuidMsb, long uuidLsb);
     public static native void serverSetRanges(long handle, float normal, float whisper, float shout);
     public static native void serverSetPermissions(long handle, long uuidMsb, long uuidLsb, boolean canSpeak, boolean canShout);
+    /** Su voz llega siempre por separado, aunque haya multitud ({@code ferrovoz.priority}). */
+    public static native void serverSetPriority(long handle, long uuidMsb, long uuidLsb, boolean priority);
+    /** Voces por separado como mucho en cada zona; las demás se mezclan en el murmullo (0 = sin límite). */
+    public static native void serverSetMaxVoices(long handle, int maxVoices);
+    /** Varias oclusiones de golpe: {@code pairs} = [hablante msb, lsb, oyente msb, lsb, ...], {@code amounts} una por pareja. */
+    public static native void serverSetOcclusions(long handle, long[] pairs, float[] amounts);
     public static native boolean serverIsMuted(long handle, long uuidMsb, long uuidLsb);
     /** {@code [conectados, por túnel, grupos, in, out, rechazados, replay, limitados, ns de CPU del relé]}. */
     public static native long[] serverStatus(long handle);

@@ -37,6 +37,12 @@ public final class FerrovozConfig {
      * (solo entre ellos) u {@code off}.
      */
     /** Por defecto {@code ghost}, para que los espectadores no molesten. */
+    /**
+     * Voces por separado como mucho en cada zona de 8 bloques. Si a una zona le
+     * llegan más, las más lejanas se mezclan en el servidor en un murmullo de fondo.
+     * 0 = sin límite.
+     */
+    public int maxVoices = 24;
     public int spectators = RULE_GHOST;
     public int dead = RULE_NORMAL;
 
@@ -61,7 +67,9 @@ public final class FerrovozConfig {
             Float max = parseFloat(p, "max_distance", c.maxDistance);
             Float whisper = parseFloat(p, "whisper_distance", c.whisperDistance);
             Float shout = parseFloat(p, "shout_distance", c.shoutDistance);
-            ok = port != null && max != null && whisper != null && shout != null;
+            Integer maxVoices = parseInt(p, "max_voices", c.maxVoices, 0, 256);
+            ok = port != null && max != null && whisper != null && shout != null && maxVoices != null;
+            if (maxVoices != null) c.maxVoices = maxVoices;
             if (port != null) c.port = port;
             if (max != null) c.maxDistance = max;
             if (whisper != null) c.whisperDistance = whisper;
@@ -153,6 +161,7 @@ public final class FerrovozConfig {
         p.setProperty("whisper_distance", String.valueOf(whisperDistance));
         p.setProperty("shout_distance", String.valueOf(shoutDistance));
         p.setProperty("transport", transportName());
+        p.setProperty("max_voices", String.valueOf(maxVoices));
         p.setProperty("spectators", ruleName(spectators));
         p.setProperty("dead", ruleName(dead));
         try {
@@ -160,7 +169,9 @@ public final class FerrovozConfig {
             try (Writer w = Files.newBufferedWriter(file)) {
                 p.store(w, "Ferrovoz - proximity voice chat. port = UDP port; transport = auto | udp | tunnel\n"
                         + " spectators / dead = normal (like anyone) | listen (hear, can't be heard)"
-                        + " | ghost (talk among themselves, hear the living) | own (only among themselves) | off");
+                        + " | ghost (talk among themselves, hear the living) | own (only among themselves) | off\n"
+                        + " max_voices = voices heard separately per area in a crowd; the rest is mixed into"
+                        + " a background murmur (0 = no limit)");
             }
         } catch (IOException e) {
             FerrovozLog.LOG.warn("Could not save ferrovoz.properties", e);

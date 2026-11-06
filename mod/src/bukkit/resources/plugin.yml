@@ -25,3 +25,6 @@ permissions:
   ferrovoz.admin:
     description: Moderation commands (/voice status, mute, unmute)
     default: op
+  ferrovoz.priority:
+    description: Always heard separately in a crowd (event host)
+    default: op

@@ -24,6 +24,11 @@ impl VoiceEncoder {
         let _ = self.inner.set_packet_loss_perc(expected_loss_percent.clamp(0, 100));
     }
 
+    /// Complejidad de Opus (0-10): menos es más rápido y algo peor.
+    pub fn set_complexity(&mut self, complexity: i32) {
+        let _ = self.inner.set_complexity(complexity.clamp(0, 10));
+    }
+
     /// Codifica una trama de 20 ms (960 muestras mono f32).
     pub fn encode(&mut self, pcm: &[f32]) -> Result<&[u8], opus::Error> {
         debug_assert_eq!(pcm.len(), FRAME_SAMPLES);

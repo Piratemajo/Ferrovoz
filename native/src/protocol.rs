@@ -40,6 +40,9 @@ pub const UUID_LEN: usize = 16;
 pub type PlayerKey = [u8; KEY_LEN];
 pub type PlayerId = [u8; UUID_LEN];
 
+/// Emisor del murmullo de la multitud (ver [`crate::crowd`]). No es un jugador.
+pub const CROWD_ID: PlayerId = *b"ferrovoz:crowd!!";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PacketType {
@@ -553,6 +556,19 @@ impl AudioDown {
         v
     }
 
+    /// La misma trama para otro oyente: copia `template` (de [`encode`](Self::encode))
+    /// cambiando solo lo que depende del oyente. Evita volver a montar la trama y
+    /// copiar el Opus por separado para cada oyente.
+    pub fn for_listener(template: &[u8], rel: [f32; 3], occlusion: u8) -> Vec<u8> {
+        let mut v = template.to_vec();
+        let at = UUID_LEN + 4;
+        for (k, c) in rel.iter().enumerate() {
+            v[at + 4 * k..at + 4 * k + 4].copy_from_slice(&c.to_le_bytes());
+        }
+        v[Self::FIXED - 1] = occlusion;
+        v
+    }
+
     pub fn decode(b: &[u8]) -> Result<Self, ProtocolError> {
         if b.len() < Self::FIXED {
             return Err(ProtocolError::Malformed);
@@ -772,4 +788,23 @@ mod tests {
         assert_eq!(uuid_from_str(&uuid_to_string(&id)), Some(id));
         assert_eq!(uuid_to_string(&uuid_from_java(0x0123_4567_89ab_cdef, 0)), "01234567-89ab-cdef-0000-000000000000");
     }
+
+    #[test]
+    fn audio_down_for_another_listener() {
+        let base = AudioDown {
+            sender: [7; 16],
+            seq: 42,
+            rel: [0.0; 3],
+            range: 48.0,
+            group: false,
+            underwater: true,
+            env: Environment { wet: 3, room: 4 },
+            occlusion: 0,
+            opus: vec![1, 2, 3, 4, 5],
+        };
+        let template = base.encode();
+        let other = AudioDown { rel: [1.5, -2.0, 30.25], occlusion: 200, ..base.clone() };
+        assert_eq!(AudioDown::for_listener(&template, other.rel, other.occlusion), other.encode());
+    }
+
 }

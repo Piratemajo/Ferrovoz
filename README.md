@@ -11,7 +11,8 @@ Java solo hace de pegamento con el juego; captura, códec, red, cifrado, mezcla 
 - **Susurrar (B) y gritar (G)**: alcance de 8 y 96 bloques (configurable) además del normal de 48.
 - **Grupos**: `/voz grupo crear <nombre> [contraseña]`. Los miembros se oyen a cualquier distancia y dimensión, como una radio; el resto no los oye. Tienen **dueño** (puede expulsar, fijar y borrar), avisan por chat cuando alguien entra o sale, y se ven en el HUD (⚑, ★ si es permanente). Los **permanentes** (`/voz grupo fijar`) sobreviven a reinicios y sus miembros vuelven solos al entrar.
 - **El sonido rodea**: si la línea recta está tapada pero hay un camino abierto (una puerta, una ventana, doblar una esquina), la voz llega también por ahí, más clara que a través del muro y **desde el hueco**. Cada esquina la baja y le quita agudos (los graves rodean mejor). Se busca con A* por los bloques donde pasa el sonido (puertas y trampillas abiertas, plantas, agua…) y después se "tira de la cuerda" para quedarse con las esquinas de verdad; como mucho 2000 bloques y un camino por tick, así que cuesta 1–2 ms y no se nota. Las puertas cerradas, el cristal y las vallas tapan la mitad que un bloque macizo.
-- **Paredes que amortiguan**: con bloques sólidos entre medias la voz suena más baja y apagada (se filtran los agudos). Si quien habla está fuera de tu distancia de renderizado, las calcula el servidor (Fabric, Paper y Spigot; en Folia solo el cliente).
+- **Paredes que amortiguan**: con bloques sólidos entre medias la voz suena más baja y apagada (se filtran los agudos). Si quien habla está fuera de tu distancia de renderizado, las calcula el servidor (Fabric, Paper y Spigot; en Folia solo el cliente), con un coste fijo por tick: como mucho 300 líneas, las parejas más cercanas primero, y sin recalcular si nadie se ha movido de bloque. Con 250 personas juntas y 100 hablando: 0,2 ms por tick de media.
+- **Multitudes y eventos**: a partir de unas 20 voces a la vez ya no se distingue a nadie, y mandarlas todas a todos satura el servidor. Si a una zona (cubos de 8 bloques) le llegan más de `max_voices` voces (24 por defecto), sus jugadores reciben por separado las 24 más cercanas, con audio 3D, paredes y eco, y el resto **mezclado en el servidor como el murmullo de la multitud**, que suena desde donde está el grueso de la gente: no desaparece nadie. La mezcla se hace por zona, no por jugador, así que cuesta poco aunque haya cientos. Quien tenga `ferrovoz.priority` (por defecto, operadores) **se oye siempre por separado**, aunque hable toda la plaza: para quien presenta el evento. Con menos voces que el límite no cambia nada, y funciona con clientes de cualquier versión.
 - **Eco según la forma del sitio**: la voz resuena si tú **o quien habla** estáis en una cueva o sala cerrada. 42 rayos miden la sala: la duración del eco sale de su tamaño y sus materiales (Sabine: un cuarto de piedra ~1,1 s, una caverna hasta 3,5 s, una sala de lana 0,25 s), la lana y la madera además se comen los agudos, y los **primeros ecos** llegan de las paredes cercanas, desde su lado y con su retardo de ida y vuelta (una pared a 6 bloques: 35 ms). Al aire libre, sin eco. Y al hablar tú dentro, **oyes tu propio eco** (solo el rebote, no tu voz directa). Se puede desactivar en Ajustes (J).
 - **Voz bajo el agua**: si quien habla tiene la cabeza sumergida, o la tienes tú, la voz llega como bajo el agua: sin agudos, hueca, con el tono ondulando como el agua en movimiento y un leve burbujeo. Con los dos sumergidos, aún más tapada. Entra y sale poco a poco, sin chasquidos. También se puede desactivar en Ajustes (J). Lo de quien habla lo calcula el servidor con el juego, así que funciona aunque esté fuera de tu vista.
 - **Volumen por jugador**: baja o silencia a alguien solo para ti (J → Jugadores…). Se guarda.
@@ -56,6 +57,7 @@ Java solo hace de pegamento con el juego; captura, códec, red, cifrado, mezcla 
   | `ferrovoz.shout` | todos | gritar (sin él, el grito es voz normal) |
   | `ferrovoz.groups` | todos | usar grupos |
   | `ferrovoz.admin` | operadores | `/voz estado`, silenciar, y expulsar/fijar/borrar en cualquier grupo |
+  | `ferrovoz.priority` | operadores | en una multitud, que se le oiga siempre por separado (el anfitrión de un evento) |
 
   En Fabric se usa la API de permisos de Fabric con `ferrovoz:speak`…, y LuckPerms lo traduce a `ferrovoz.speak` (comprobado en su código fuente). En NeoForge y Forge, sus API de permisos con los mismos nodos. Se reconsultan cada 5 s: los cambios se aplican en caliente.
 
@@ -66,7 +68,7 @@ Java solo hace de pegamento con el juego; captura, códec, red, cifrado, mezcla 
 - **Retraso según tu red**: antes de reproducir cada frase se guarda un pequeño colchón, y su tamaño se ajusta a la conexión de cada persona. Se mide con qué retraso llegan sus paquetes y se espera lo justo para cubrir el 97 %: con fibra o cable, 40 ms; con Wi-Fi malo o datos móviles, hasta 160 ms para que no se corte. Si un paquete llega tarde a media frase se espera por él en vez de tirarlo. En una red simulada con ±120 ms de variación los cortes bajan del 14 % al 0 %, y con buena red el retraso baja de ~60 a ~40 ms.
 - **Opus** con FEC, **ChaCha20-Poly1305** por jugador, **jitter buffer** de 60 ms.
 - **Limpieza del micro**, en este orden: cancelación de eco (AEC3 de WebRTC, en Rust) → paso alto a 80 Hz + RNNoise (Rust puro) + puerta de ruido → ganancia automática. Medido: ventilador −63 dB, zumbido de 50 Hz −38 dB, siseo −26 dB en la trama típica.
-- El servidor **no decodifica audio**: reenvía bytes Opus, así que aguanta muchos jugadores con muy poca CPU.
+- El servidor **no decodifica audio**: reenvía bytes Opus, así que aguanta muchos jugadores con muy poca CPU. La excepción son las multitudes: ahí decodifica las voces lejanas una vez y mezcla un murmullo por zona.
 
 ## Cómo funciona
 
@@ -111,7 +113,7 @@ Java solo hace de pegamento con el juego; captura, códec, red, cifrado, mezcla 
 Necesitas **Rust** (stable), **JDK 25** y, en Linux, `libasound2-dev` y `cmake`.
 
 ```bash
-cd native && cargo test          # 129 tests: unitarios + extremo a extremo por red (incluidos ataques)
+cd native && cargo test          # 141 tests: unitarios + extremo a extremo por red (incluidos ataques)
 cd ../mod && ./gradlew build     # compila Rust (con y sin audio) y lo mete en el .jar
 ```
 
@@ -198,6 +200,7 @@ shout_distance=96     # alcance al gritar
 transport=auto        # auto = UDP y, si no llega, túnel · udp = solo UDP · tunnel = siempre por el juego
 spectators=ghost      # espectadores: ghost (por defecto) · normal · listen · own · off (ver «Espectadores y muertos»)
 dead=normal           # muertos: igual
+max_voices=24         # voces por separado como mucho en cada zona; el resto, al murmullo (0 = sin límite)
 ```
 
 ### Detrás de un proxy (Velocity, BungeeCord…)
@@ -278,10 +281,14 @@ El relé aislado, con clientes falsos por UDP real. Medido en una máquina de 2 
 
 | Escenario | Jugadores | Hablando | CPU del relé | Paquetes enviados/s | Voz entregada |
 |---|---|---|---|---|---|
-| Repartidos por el mapa | 100 | 20 | **2 %** | 4 000 | 100 % |
-| Evento, todos juntos | 50 | 10 | 5 % | 24 500 | 100 % |
-| Plaza llena | 100 | 25 | 24 % | 124 000 | 100 % |
-| Extremo: 100 juntos hablando todos a la vez | 100 | 100 | 89 % | 465 000 | 94 % |
+| Repartidos por el mapa | 100 | 20 | **2 %** | 4 200 | 100 % |
+| Evento, todos juntos | 50 | 10 | 8 % | 24 500 | 100 % |
+| Plaza llena | 100 | 25 | 35 % | 124 000 | 100 % |
+| Extremo: 100 juntos hablando todos a la vez | 100 | 100 | 134 % | 495 000 | 100 % |
+| Evento de 250, 150 hablando, **sin límite** (`max_voices=0`) | 250 | 150 | 148 % (saturado) | 577 000 | **31 %** |
+| Evento de 250, 150 hablando, **con `max_voices=24`** | 250 | 150 | 141 % | 299 000 | todas las que tocan + murmullo |
+
+La CPU es la de todos los hilos del relé juntos (recibir, cifrar y enviar, y mezclar el murmullo); 100 % = un núcleo. Sin límite, 250 personas juntas con 150 hablando piden casi 1,9 millones de paquetes por segundo: el relé no da abasto, recibe solo un tercio de la voz y entrega un 31 %. Con el límite recibe toda la voz y envía lo que debe: 24 voces y el murmullo a cada uno.
 
 Cada paquete cuesta unos 2 µs (cifrar y enviar). El relé no bloquea el tick de Minecraft: recibe en su propio hilo y reparte el cifrado y el envío entre hilos de ayuda (uno por núcleo libre, hasta 7). En Linux envía en lotes de 64 paquetes por llamada al sistema (`sendmmsg`). Su techo crece con los núcleos: unos 400 000 paquetes por segundo por núcleo.
 
@@ -297,4 +304,4 @@ Ferrovoz es MIT. El jar incluye `META-INF/THIRD_PARTY_LICENSES.txt` con las lice
 cd native && cargo test --release
 ```
 
-129 tests: unitarios (audio, cifrado, jitter buffer, HRTF, reverb, AEC/AGC...) y de extremo a extremo con un relé real por UDP en localhost: alcances, grupos, permisos, túnel, pérdida de paquetes, ataques de replay y flood, reglas de espectadores, repeticiones y voz a través del proxy. La prueba de carga está en [Rendimiento](#rendimiento).
+141 tests: unitarios (audio, cifrado, jitter buffer, HRTF, reverb, AEC/AGC, mezcla de multitudes...) y de extremo a extremo con un relé real por UDP en localhost: alcances, grupos, permisos, túnel, pérdida de paquetes, ataques de replay y flood, reglas de espectadores, repeticiones, multitudes y anfitrión, y voz a través del proxy. La prueba de carga está en [Rendimiento](#rendimiento).

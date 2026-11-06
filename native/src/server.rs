@@ -10,12 +10,15 @@
 //! Anti-replay por contador en el nonce y límite de tráfico por jugador e IP.
 //! Los silencios de moderación y los grupos permanentes se guardan en un fichero.
 //!
-//! No decodifica audio: reenvía el Opus tal cual, así que gasta muy poca CPU.
+//! No decodifica audio: reenvía el Opus tal cual, así que gasta muy poca CPU. La
+//! excepción son las multitudes (ver [`crate::crowd`]): si a una zona le llegan
+//! más de `max_voices` voces, las lejanas se mezclan en el servidor.
 
 use crate::protocol::{
     self, AudioDown, AudioUp, Environment, GroupState, PacketType, PeerStates, PlayerId, PlayerKey, PongInfo, ReplayWindow,
-    TalkMode, MAX_PACKET, OCCLUSION_UNKNOWN,
+    TalkMode, CROWD_ID, MAX_PACKET, OCCLUSION_UNKNOWN,
 };
+use crate::crowd::{self, Cell};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io;
 use std::net::{IpAddr, SocketAddr, UdpSocket};
@@ -36,8 +39,18 @@ pub const MAX_GROUP_NAME: usize = 24;
 pub const MAX_PASSWORD: usize = 32;
 /// Margen para considerar que alguien habla (para la oclusión).
 const ACTIVE_SPEAKER: Duration = Duration::from_millis(400);
+/// Parejas para calcular paredes como mucho: las más cercanas. Las demás se quedan
+/// con la oclusión que calcula el cliente.
+const ACTIVE_PAIRS_MAX: usize = 2000;
 /// Validez de una oclusión calculada por el servidor.
 const OCCLUSION_TTL: Duration = Duration::from_secs(1);
+/// Cada cuánto se decide qué voces van por separado en las zonas con multitud.
+const CROWD_PLAN_EVERY: u32 = 5;
+/// Una trama de voz.
+const FRAME: Duration = Duration::from_millis(20);
+/// Distancia a la que se coloca el murmullo para el cliente: dentro de su zona de
+/// volumen completo, porque la mezcla ya lleva la atenuación de cada voz.
+const CROWD_REL_DISTANCE: f64 = 3.0;
 /// Máximo de eventos de grupo en cola.
 const EVENTS_MAX: usize = 256;
 
@@ -223,6 +236,8 @@ struct Player {
     env: Environment,
     last_audio: Option<Instant>,
     talk_range: f32,
+    /// Se le oye siempre por separado, aunque haya multitud (`ferrovoz.priority`).
+    priority: bool,
 }
 
 impl Player {
@@ -269,6 +284,12 @@ struct State {
     bad_ips: HashMap<IpAddr, TokenBucket>,
     /// Reglas para espectadores y muertos.
     role_rules: RoleRules,
+    /// Voces por separado como mucho en cada zona; 0 = sin límite.
+    max_voices: usize,
+    /// Zonas con multitud: qué voces van por separado.
+    crowd_plans: HashMap<Cell, HashSet<PlayerId>>,
+    /// Tramas que esperan a mezclarse en el murmullo.
+    crowd_stash: crowd::Stash,
 }
 
 struct Shared {
@@ -281,6 +302,7 @@ struct Shared {
 pub struct VoiceServer {
     shared: Arc<Shared>,
     thread: Option<JoinHandle<()>>,
+    crowd_thread: Option<JoinHandle<()>>,
 }
 
 /// Paquetes UDP pendientes de enviar.
@@ -307,6 +329,9 @@ impl VoiceServer {
                 occlusion: HashMap::new(),
                 bad_ips: HashMap::new(),
                 role_rules: RoleRules::default(),
+                max_voices: 0,
+                crowd_plans: HashMap::new(),
+                crowd_stash: crowd::Stash::default(),
             }),
             running: AtomicBool::new(true),
             stats: ServerStats::default(),
@@ -315,7 +340,11 @@ impl VoiceServer {
         let thread = std::thread::Builder::new()
             .name("ferrovoz-server".into())
             .spawn(move || worker.run())?;
-        Ok(Self { shared, thread: Some(thread) })
+        let mixer = shared.clone();
+        let crowd_thread = std::thread::Builder::new()
+            .name("ferrovoz-crowd".into())
+            .spawn(move || mixer.crowd_loop())?;
+        Ok(Self { shared, thread: Some(thread), crowd_thread: Some(crowd_thread) })
     }
 
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
@@ -384,6 +413,7 @@ impl VoiceServer {
                     env: Environment::default(),
                     last_audio: None,
                     talk_range: 0.0,
+                    priority: false,
                 },
             );
             // Si era miembro de un grupo permanente, vuelve a él.
@@ -459,6 +489,22 @@ impl VoiceServer {
         if let Some(p) = self.state().players.get_mut(id) {
             p.can_speak = can_speak;
             p.can_shout = can_shout;
+        }
+    }
+
+    /// Su voz llega siempre por separado, aunque haya multitud (el anfitrión de un evento).
+    pub fn set_priority(&self, id: &PlayerId, priority: bool) {
+        if let Some(p) = self.state().players.get_mut(id) {
+            p.priority = priority;
+        }
+    }
+
+    /// Voces por separado como mucho en cada zona (0 = sin límite).
+    pub fn set_max_voices(&self, max: usize) {
+        let mut st = self.state();
+        st.max_voices = max;
+        if max == 0 {
+            st.crowd_plans.clear();
         }
     }
 
@@ -655,10 +701,12 @@ impl VoiceServer {
 
     /// Pares (hablante, oyente) de proximidad activos ahora, para que Java calcule
     /// la oclusión con el mundo del servidor.
+    /// Parejas (hablante, oyente) que se oyen por separado, de más cerca a más lejos
+    /// y como mucho [`ACTIVE_PAIRS_MAX`].
     pub fn active_pairs(&self) -> Vec<(PlayerId, PlayerId)> {
         let st = self.state();
         let now = Instant::now();
-        let mut pairs = Vec::new();
+        let mut pairs: Vec<(f64, PlayerId, PlayerId)> = Vec::new();
         for (sid, s) in &st.players {
             if s.group.is_some() || !s.last_audio.is_some_and(|t| now.duration_since(t) < ACTIVE_SPEAKER) {
                 continue;
@@ -675,18 +723,39 @@ impl VoiceServer {
                 {
                     continue;
                 }
+                // Lo que le llega en el murmullo no necesita paredes.
+                if !s.priority
+                    && st.crowd_plans.get(&Cell::of(l.pos, l.dimension)).is_some_and(|near| !near.contains(sid))
+                {
+                    continue;
+                }
                 let d = [s.pos[0] - l.pos[0], s.pos[1] - l.pos[1], s.pos[2] - l.pos[2]];
-                if d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= r2 {
-                    pairs.push((*sid, *lid));
+                let d2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+                if d2 <= r2 {
+                    pairs.push((d2, *sid, *lid));
                 }
             }
         }
-        pairs
+        if pairs.len() > ACTIVE_PAIRS_MAX {
+            pairs.select_nth_unstable_by(ACTIVE_PAIRS_MAX, |a, b| a.0.total_cmp(&b.0));
+            pairs.truncate(ACTIVE_PAIRS_MAX);
+        }
+        pairs.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+        pairs.into_iter().map(|(_, s, l)| (s, l)).collect()
     }
 
     pub fn set_occlusion(&self, speaker: &PlayerId, listener: &PlayerId, amount: f32) {
-        let q = (amount.clamp(0.0, 1.0) * 254.0).round() as u8;
-        self.state().occlusion.insert((*speaker, *listener), (q, Instant::now()));
+        self.set_occlusions(&[(*speaker, *listener, amount)]);
+    }
+
+    /// Varias de golpe (un solo lock).
+    pub fn set_occlusions(&self, values: &[(PlayerId, PlayerId, f32)]) {
+        let now = Instant::now();
+        let mut st = self.state();
+        for (speaker, listener, amount) in values {
+            let q = (amount.clamp(0.0, 1.0) * 254.0).round() as u8;
+            st.occlusion.insert((*speaker, *listener), (q, now));
+        }
     }
 
     // Túnel
@@ -716,6 +785,9 @@ impl VoiceServer {
     pub fn stop(&mut self) {
         self.shared.running.store(false, Ordering::SeqCst);
         if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+        if let Some(t) = self.crowd_thread.take() {
             let _ = t.join();
         }
     }
@@ -938,6 +1010,134 @@ impl Shared {
         }
     }
 
+    /// Hilo de multitudes: cada 20 ms mezcla el murmullo de las zonas con multitud y
+    /// cada 100 ms decide qué voces van por separado en cada zona.
+    fn crowd_loop(self: &Arc<Self>) {
+        let mut mixer = crowd::Mixer::new();
+        let mut tick: u32 = 0;
+        let mut next = Instant::now();
+        while self.running.load(Ordering::Relaxed) {
+            next += FRAME;
+            let now = Instant::now();
+            if next > now {
+                std::thread::sleep(next - now);
+            } else if now - next > FRAME * 5 {
+                next = now; // muy atrasado (máquina parada): no intentar recuperar
+            }
+            tick = tick.wrapping_add(1);
+            if tick.is_multiple_of(CROWD_PLAN_EVERY) {
+                self.plan_crowds();
+                mixer.cleanup(Instant::now());
+            }
+            self.mix_crowds(&mut mixer, tick);
+        }
+    }
+
+    /// Para cada zona con oyentes, si le llegan más de `max_voices` voces, cuáles
+    /// van por separado.
+    fn plan_crowds(&self) {
+        let mut st = self.state.lock().unwrap();
+        if st.max_voices == 0 {
+            st.crowd_plans.clear();
+            return;
+        }
+        let now = Instant::now();
+        let rules = st.role_rules;
+        // Los de prioridad no cuentan: van siempre por separado.
+        let speakers: Vec<crowd::Speaker> = st
+            .players
+            .iter()
+            .filter(|(id, p)| {
+                p.group.is_none()
+                    && !p.priority
+                    && p.can_speak
+                    && !st.admin_muted.contains(*id)
+                    && rules.can_be_heard(p.role)
+                    && p.last_audio.is_some_and(|t| now.duration_since(t) < ACTIVE_SPEAKER)
+            })
+            .map(|(id, p)| crowd::Speaker { id: *id, pos: p.pos, dim: p.dimension, range: p.talk_range })
+            .collect();
+        if speakers.len() <= st.max_voices {
+            st.crowd_plans.clear();
+            return;
+        }
+        let cells: HashSet<Cell> = st
+            .players
+            .values()
+            .filter(|p| !matches!(p.transport, Transport::Pending))
+            .map(|p| Cell::of(p.pos, p.dimension))
+            .collect();
+        st.crowd_plans = crowd::plan(cells, &speakers, st.max_voices);
+    }
+
+    /// Mezcla y envía el murmullo de cada zona con multitud.
+    fn mix_crowds(&self, mixer: &mut crowd::Mixer, tick: u32) {
+        // 1. Con el lock, solo copiar lo necesario.
+        let now = Instant::now();
+        let (frames, cells) = {
+            let mut st = self.state.lock().unwrap();
+            if st.crowd_plans.is_empty() && st.crowd_stash.is_empty() {
+                return;
+            }
+            let frames = st.crowd_stash.take(now);
+            let cells: Vec<(Cell, HashSet<PlayerId>)> =
+                st.crowd_plans.iter().map(|(c, near)| (*c, near.clone())).collect();
+            (frames, cells)
+        };
+        if frames.is_empty() || cells.is_empty() {
+            return;
+        }
+
+        // 2. Sin el lock: decodificar cada voz una vez y mezclar cada zona.
+        let voices = mixer.decode(frames, now);
+        let mixes: HashMap<Cell, crowd::CellMix> = cells
+            .into_iter()
+            .filter_map(|(cell, near)| mixer.mix(cell, &near, &voices, now).map(|m| (cell, m)))
+            .collect();
+        if mixes.is_empty() {
+            return;
+        }
+
+        // 3. Con el lock: cifrar para cada oyente de esas zonas y enviar.
+        let mut out = Vec::new();
+        {
+            let mut st = self.state.lock().unwrap();
+            let rules = st.role_rules;
+            let range = st.ranges.normal;
+            for p in st.players.values_mut() {
+                if matches!(p.transport, Transport::Pending) || !rules.can_hear(Role::Alive, p.role) {
+                    continue;
+                }
+                let Some(mix) = mixes.get(&Cell::of(p.pos, p.dimension)) else { continue };
+                // Dirección hacia la multitud, a una distancia que el cliente oye a
+                // volumen completo (la mezcla ya lleva la atenuación de cada voz).
+                let mut rel = [mix.centroid[0] - p.pos[0], mix.centroid[1] - p.pos[1], mix.centroid[2] - p.pos[2]];
+                let len = (rel[0] * rel[0] + rel[1] * rel[1] + rel[2] * rel[2]).sqrt();
+                if len > CROWD_REL_DISTANCE {
+                    for r in rel.iter_mut() {
+                        *r *= CROWD_REL_DISTANCE / len;
+                    }
+                }
+                let down = AudioDown {
+                    sender: CROWD_ID,
+                    // El mismo número en todas las zonas: al cambiar de zona el
+                    // cliente sigue el murmullo sin saltos.
+                    seq: tick,
+                    rel: [rel[0] as f32, rel[1] as f32, rel[2] as f32],
+                    range,
+                    group: false,
+                    underwater: false,
+                    env: Environment::default(),
+                    occlusion: OCCLUSION_UNKNOWN,
+                    opus: mix.opus.clone(),
+                };
+                let pkt = p.seal(PacketType::AudioDown, &down.encode());
+                deliver(&self.stats, p, pkt, &mut out);
+            }
+        }
+        self.send_udp(out);
+    }
+
     fn broadcast_peer_states(&self, out: &mut Outgoing) {
         let mut st = self.state.lock().unwrap();
         let st = &mut *st;
@@ -1096,6 +1296,7 @@ impl Shared {
                 };
                 sender.last_audio = Some(Instant::now());
                 sender.talk_range = range;
+                let src_priority = sender.priority;
 
                 let recipients: Vec<PlayerId> = st
                     .players
@@ -1121,7 +1322,37 @@ impl Shared {
                     .map(|(id, _)| *id)
                     .collect();
 
+                // Multitud: a las zonas donde esta voz no va por separado le llega
+                // en el murmullo.
+                let mut recipients = recipients;
+                if group.is_none() && !src_priority && !st.crowd_plans.is_empty() {
+                    let before = recipients.len();
+                    let (players, plans) = (&st.players, &st.crowd_plans);
+                    recipients.retain(|id| {
+                        let l = &players[id];
+                        plans.get(&Cell::of(l.pos, l.dimension)).is_none_or(|near| near.contains(&sender_id))
+                    });
+                    if recipients.len() < before && src_role == Role::Alive {
+                        let speaker = crowd::Speaker { id: sender_id, pos: src_pos, dim: src_dim, range };
+                        st.crowd_stash.push(speaker, frame.opus.clone(), Instant::now());
+                    }
+                }
+
                 let now = Instant::now();
+                // La trama se monta una vez; para cada oyente solo cambian su
+                // posición relativa y la oclusión.
+                let template = AudioDown {
+                    sender: sender_id,
+                    seq: frame.seq,
+                    rel: [0.0; 3],
+                    range: if group.is_some() { 0.0 } else { range },
+                    group: group.is_some(),
+                    underwater,
+                    env,
+                    occlusion: OCCLUSION_UNKNOWN,
+                    opus: frame.opus,
+                }
+                .encode();
                 for id in recipients {
                     let occlusion = match st.occlusion.get(&(sender_id, id)) {
                         Some((v, t)) if now.duration_since(*t) < OCCLUSION_TTL => *v,
@@ -1129,30 +1360,15 @@ impl Shared {
                     };
                     let listener = st.players.get_mut(&id).unwrap();
                     let rel = [src_pos[0] - listener.pos[0], src_pos[1] - listener.pos[1], src_pos[2] - listener.pos[2]];
-                    let down = AudioDown {
-                        sender: sender_id,
-                        seq: frame.seq,
-                        rel: [rel[0] as f32, rel[1] as f32, rel[2] as f32],
-                        range: if group.is_some() { 0.0 } else { range },
-                        group: group.is_some(),
-                        underwater,
-                        env,
-                        occlusion,
-                        opus: frame.opus.clone(),
-                    };
+                    let body = AudioDown::for_listener(&template, [rel[0] as f32, rel[1] as f32, rel[2] as f32], occlusion);
                     match listener.transport {
                         // UDP: el contador se reserva aquí y se cifra fuera del lock.
                         Transport::Udp(addr) => {
                             listener.tx_counter += 1;
-                            jobs.push(SealJob {
-                                addr,
-                                key: listener.key,
-                                counter: listener.tx_counter,
-                                body: down.encode(),
-                            });
+                            jobs.push(SealJob { addr, key: listener.key, counter: listener.tx_counter, body });
                         }
                         _ => {
-                            let pkt = listener.seal(PacketType::AudioDown, &down.encode());
+                            let pkt = listener.seal(PacketType::AudioDown, &body);
                             deliver(&self.stats, listener, pkt, out);
                         }
                     }

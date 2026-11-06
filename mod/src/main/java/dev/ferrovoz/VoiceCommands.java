@@ -42,6 +42,16 @@ public final class VoiceCommands {
     public static final String PERM_GROUPS = "groups";
     /** Comandos de moderación (por defecto: operadores). */
     public static final String PERM_ADMIN = "admin";
+    /**
+     * Voz siempre por separado aunque haya multitud, para el anfitrión de un evento
+     * (por defecto: operadores).
+     */
+    public static final String PERM_PRIORITY = "priority";
+
+    /** Permisos que por defecto solo tienen los operadores. */
+    public static boolean opByDefault(String node) {
+        return PERM_ADMIN.equals(node) || PERM_PRIORITY.equals(node);
+    }
 
     private static final String ERR = "§c";
 

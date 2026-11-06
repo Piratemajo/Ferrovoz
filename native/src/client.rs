@@ -704,6 +704,18 @@ impl VoiceClient {
         }
     }
     /// Jugadores que están hablando ahora, y si es por grupo.
+    /// Está llegando el murmullo de una multitud (ver [`crate::crowd`]).
+    pub fn hearing_crowd(&self) -> bool {
+        let now = Instant::now();
+        self.shared
+            .mixer
+            .lock()
+            .unwrap()
+            .speakers
+            .get(&protocol::CROWD_ID)
+            .is_some_and(|s| now.duration_since(s.last_packet) < SPEAKING_WINDOW)
+    }
+
     pub fn speaking_players(&self) -> Vec<(PlayerId, bool)> {
         let now = Instant::now();
         self.shared
@@ -712,7 +724,7 @@ impl VoiceClient {
             .unwrap()
             .speakers
             .iter()
-            .filter(|(_, s)| now.duration_since(s.last_packet) < SPEAKING_WINDOW)
+            .filter(|(id, s)| now.duration_since(s.last_packet) < SPEAKING_WINDOW && **id != protocol::CROWD_ID)
             .map(|(id, s)| (*id, s.group))
             .collect()
     }

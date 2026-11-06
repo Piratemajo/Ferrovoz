@@ -54,8 +54,8 @@ public final class Ferrovoz {
 
     /** Ticks entre consultas de permisos (pueden cambiar en caliente). */
     private static final int PERMISSION_REFRESH_TICKS = 100;
-    /** Ticks entre recálculos de oclusión. */
-    private static final int WALLS_EVERY_TICKS = 4;
+    /** Paredes calculadas en el servidor, con un coste fijo por tick. */
+    private static WallScheduler walls = new WallScheduler();
 
     private static Platform platform;
     private static boolean nativeLoaded;
@@ -107,6 +107,8 @@ public final class Ferrovoz {
         }
         FerrovozNative.serverSetRanges(server, config.maxDistance, config.whisperDistance, config.shoutDistance);
         FerrovozNative.serverSetRoleRules(server, config.spectators, config.dead);
+        FerrovozNative.serverSetMaxVoices(server, config.maxVoices);
+        walls = new WallScheduler();
         // Silencios y grupos permanentes.
         FerrovozNative.serverSetDataFile(server, dataFile.toAbsolutePath().toString());
         host = VanillaVoiceCommands.host(srv, () -> server, () -> config);
@@ -199,6 +201,8 @@ public final class Ferrovoz {
         FerrovozNative.serverSetPermissions(server, id.getMostSignificantBits(), id.getLeastSignificantBits(),
                 platform.hasPermission(p, VoiceCommands.PERM_SPEAK),
                 platform.hasPermission(p, VoiceCommands.PERM_SHOUT));
+        FerrovozNative.serverSetPriority(server, id.getMostSignificantBits(), id.getLeastSignificantBits(),
+                platform.hasPermission(p, VoiceCommands.PERM_PRIORITY));
     }
 
     /** Al empezar cada tick (solo para el benchmark). */
@@ -231,9 +235,7 @@ public final class Ferrovoz {
             VoiceCommands.dispatchEvents(host); // avisos de grupo por chat
         }
         Bench.tickPlayers(s, refreshPermissions); // solo en modo benchmark
-        if (ticks % WALLS_EVERY_TICKS == 0) {
-            updateWalls(s);
-        }
+        walls.tick(s, Ferrovoz::eye);
         Bench.ferrovozTime(System.nanoTime() - started);
         Bench.onEndTick(srv, s);
     }
@@ -254,29 +256,22 @@ public final class Ferrovoz {
         return Bench.locate(id);
     }
 
-    /** Oclusión entre cada pareja activa con los bloques del servidor (solo chunks cargados). */
-    private static void updateWalls(long s) {
-        long[] pairs = FerrovozNative.serverActivePairs(s);
-        for (int i = 0; pairs != null && i + 3 < pairs.length; i += 4) {
-            Located speaker = locate(new UUID(pairs[i], pairs[i + 1]));
-            Located listener = locate(new UUID(pairs[i + 2], pairs[i + 3]));
-            if (speaker == null || listener == null || speaker.level() != listener.level()) continue;
-            Level level = speaker.level();
-            float occ = WallTracer.occlusion(new WallTracer.BlockProbe() {
-                @Override
-                public boolean isChunkLoaded(int cx, int cz) {
-                    return level.hasChunkAt(new BlockPos(cx << 4, 64, cz << 4));
-                }
-
-                @Override
-                public boolean isSolid(int x, int y, int z) {
-                    BlockPos pos = new BlockPos(x, y, z);
-                    return level.getBlockState(pos).isSolidRender(level, pos);
-                }
-            }, speaker.x(), speaker.y(), speaker.z(), listener.x(), listener.y(), listener.z());
-            if (occ != WallTracer.UNKNOWN) {
-                FerrovozNative.serverSetOcclusion(s, pairs[i], pairs[i + 1], pairs[i + 2], pairs[i + 3], occ);
+    /** Ojos de un jugador con voz y cómo mirar los bloques de su mundo (solo chunks cargados). */
+    private static WallScheduler.Eye eye(UUID id) {
+        Located p = locate(id);
+        if (p == null) return null;
+        Level level = p.level();
+        return new WallScheduler.Eye(level, p.x(), p.y(), p.z(), new WallTracer.BlockProbe() {
+            @Override
+            public boolean isChunkLoaded(int cx, int cz) {
+                return level.hasChunkAt(new BlockPos(cx << 4, 64, cz << 4));
             }
-        }
+
+            @Override
+            public boolean isSolid(int x, int y, int z) {
+                BlockPos pos = new BlockPos(x, y, z);
+                return level.getBlockState(pos).isSolidRender(level, pos);
+            }
+        });
     }
 }
