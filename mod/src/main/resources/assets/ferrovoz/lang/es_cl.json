@@ -65,6 +65,7 @@
   "ferrovoz.settings.status.mic_blocked_mac": "El micro llega en silencio: dale permiso en Ajustes del Sistema → Privacidad → Micrófono",
   "ferrovoz.settings.status.mic_blocked": "El micro llega en silencio: ¿está silenciado o bloqueado por el sistema?",
   "ferrovoz.settings.cave_echo": "Eco en cuevas: %s",
+  "ferrovoz.settings.off_by_server": "Desactivado por el servidor",
   "ferrovoz.settings.underwater": "Voz bajo el agua: %s",
   "ferrovoz.settings.keys": "Teclas…",
   "ferrovoz.keys.title": "Ferrovoz · Teclas",

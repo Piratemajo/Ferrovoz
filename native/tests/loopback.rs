@@ -737,6 +737,40 @@ fn cave_echo_can_be_turned_off() {
     assert!(off < 1e-6, "sin eco no queda cola");
 }
 
+#[test]
+fn the_server_can_turn_cave_echo_off_for_everyone() {
+    let s = Scene::new(&[(0.0, 1), (3.0, 1)]);
+    s.server.set_cave_echo(false);
+    // Los dos en una cueva grande y con el eco activado en sus ajustes.
+    s.clients[0].set_environment(0.45, 1.0);
+    s.clients[1].set_environment(0.45, 1.0);
+    wait_until("el oyente sabe que no hay eco", || !s.clients[1].cave_echo_allowed());
+    let speaker = &s.clients[0];
+    speaker.set_push_to_talk(true);
+    let mut out = vec![0f32; FRAME_SAMPLES * 2];
+    let mut heard = 0.0;
+    for n in 0..30 {
+        speaker.push_capture(&sine_frame(n));
+        std::thread::sleep(Duration::from_millis(20));
+        s.clients[1].render(&mut out);
+        heard += out.iter().map(|x| x * x).sum::<f32>();
+    }
+    speaker.set_push_to_talk(false);
+    std::thread::sleep(Duration::from_millis(150));
+    let mut tail = 0.0;
+    for i in 0..40 {
+        s.clients[1].render(&mut out);
+        if i >= 15 {
+            tail += out.iter().map(|x| x * x).sum::<f32>();
+        }
+    }
+    assert!(heard > 1.0, "la voz llega");
+    assert!(tail < 1e-6, "sin cola de eco: {tail}");
+    // Y al volver a permitirlo, los clientes se enteran.
+    s.server.set_cave_echo(true);
+    wait_until("el eco vuelve", || s.clients[1].cave_echo_allowed());
+}
+
 /// Desactivar la voz: el servidor deja de enviarle audio y deja de contar como
 /// conectado. Al reactivarla (misma clave, cliente nuevo) todo vuelve.
 #[test]

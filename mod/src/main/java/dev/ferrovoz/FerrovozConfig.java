@@ -35,16 +35,21 @@ public final class FerrovozConfig {
      * Espectadores y muertos: {@code normal}, {@code listen} (oyen, no se les oye),
      * {@code ghost} (hablan entre ellos y oyen a los vivos, que no les oyen), {@code own}
      * (solo entre ellos) u {@code off}.
+     * Por defecto {@code ghost}, para que los espectadores no molesten.
      */
-    /** Por defecto {@code ghost}, para que los espectadores no molesten. */
+    public int spectators = RULE_GHOST;
+    public int dead = RULE_NORMAL;
     /**
      * Voces por separado como mucho en cada zona de 8 bloques. Si a una zona le
      * llegan más, las más lejanas se mezclan en el servidor en un murmullo de fondo.
      * 0 = sin límite.
      */
     public int maxVoices = 24;
-    public int spectators = RULE_GHOST;
-    public int dead = RULE_NORMAL;
+    /**
+     * Eco en cuevas y salas. Con {@code false} no lo oye nadie, aunque lo tenga
+     * activado en sus ajustes.
+     */
+    public boolean caveEcho = true;
 
     public static final int RULE_NORMAL = 0, RULE_LISTEN = 1, RULE_GHOST = 2, RULE_OWN = 3, RULE_OFF = 4;
     private static final String[] RULE_NAMES = {"normal", "listen", "ghost", "own", "off"};
@@ -70,6 +75,9 @@ public final class FerrovozConfig {
             Integer maxVoices = parseInt(p, "max_voices", c.maxVoices, 0, 256);
             ok = port != null && max != null && whisper != null && shout != null && maxVoices != null;
             if (maxVoices != null) c.maxVoices = maxVoices;
+            Boolean caveEcho = parseBool(p, "cave_echo", c.caveEcho);
+            ok &= caveEcho != null;
+            if (caveEcho != null) c.caveEcho = caveEcho;
             if (port != null) c.port = port;
             if (max != null) c.maxDistance = max;
             if (whisper != null) c.whisperDistance = whisper;
@@ -100,6 +108,17 @@ public final class FerrovozConfig {
             // se avisa abajo
         }
         FerrovozLog.LOG.warn("ferrovoz.properties: {}='{}' is not valid (expected {}-{}); using {}", key, raw, min, max, def);
+        return null;
+    }
+
+    /** {@code true} o {@code false}; null (con aviso) si no vale. */
+    static Boolean parseBool(Properties p, String key, boolean def) {
+        String raw = p.getProperty(key);
+        if (raw == null) return def;
+        String v = raw.trim().toLowerCase(java.util.Locale.ROOT);
+        if (v.equals("true")) return true;
+        if (v.equals("false")) return false;
+        FerrovozLog.LOG.warn("ferrovoz.properties: {}='{}' is not valid (expected true or false); using {}", key, raw, def);
         return null;
     }
 
@@ -162,6 +181,7 @@ public final class FerrovozConfig {
         p.setProperty("shout_distance", String.valueOf(shoutDistance));
         p.setProperty("transport", transportName());
         p.setProperty("max_voices", String.valueOf(maxVoices));
+        p.setProperty("cave_echo", String.valueOf(caveEcho));
         p.setProperty("spectators", ruleName(spectators));
         p.setProperty("dead", ruleName(dead));
         try {
@@ -171,7 +191,9 @@ public final class FerrovozConfig {
                         + " spectators / dead = normal (like anyone) | listen (hear, can't be heard)"
                         + " | ghost (talk among themselves, hear the living) | own (only among themselves) | off\n"
                         + " max_voices = voices heard separately per area in a crowd; the rest is mixed into"
-                        + " a background murmur (0 = no limit)");
+                        + " a background murmur (0 = no limit)\n"
+                        + " cave_echo = echo in caves and rooms for everyone (false turns it off even if"
+                        + " players have it on)");
             }
         } catch (IOException e) {
             FerrovozLog.LOG.warn("Could not save ferrovoz.properties", e);

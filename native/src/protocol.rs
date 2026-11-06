@@ -223,6 +223,9 @@ pub struct AudioDown {
 pub struct PongInfo {
     /// 0..=100
     pub loss_percent: u8,
+    /// El servidor ha desactivado el eco de cuevas y salas. Va en un segundo byte
+    /// que los clientes anteriores a 0.11 no leen.
+    pub no_cave_echo: bool,
 }
 
 /// Grupo actual (nombre vacío = ninguno).
@@ -597,12 +600,17 @@ impl AudioDown {
 }
 
 impl PongInfo {
+    const NO_CAVE_ECHO: u8 = 1;
+
     pub fn encode(&self) -> Vec<u8> {
-        vec![self.loss_percent.min(100)]
+        let flags = if self.no_cave_echo { Self::NO_CAVE_ECHO } else { 0 };
+        vec![self.loss_percent.min(100), flags]
     }
 
+    /// Un Pong de un servidor antiguo trae solo la pérdida.
     pub fn decode(b: &[u8]) -> Self {
-        Self { loss_percent: b.first().copied().unwrap_or(0).min(100) }
+        let flags = b.get(1).copied().unwrap_or(0);
+        Self { loss_percent: b.first().copied().unwrap_or(0).min(100), no_cave_echo: flags & Self::NO_CAVE_ECHO != 0 }
     }
 }
 
@@ -770,7 +778,10 @@ mod tests {
 
     #[test]
     fn pong_info_roundtrip_and_clamp() {
-        assert_eq!(PongInfo::decode(&PongInfo { loss_percent: 12 }.encode()).loss_percent, 12);
+        let p = PongInfo { loss_percent: 12, no_cave_echo: true };
+        assert_eq!(PongInfo::decode(&p.encode()), p);
+        // Pong de un servidor antiguo: solo la pérdida, eco permitido.
+        assert!(!PongInfo::decode(&[12]).no_cave_echo);
         assert_eq!(PongInfo::decode(&[250]).loss_percent, 100);
         assert_eq!(PongInfo::decode(&[]).loss_percent, 0);
     }

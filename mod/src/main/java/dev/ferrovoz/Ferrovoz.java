@@ -108,6 +108,7 @@ public final class Ferrovoz {
         FerrovozNative.serverSetRanges(server, config.maxDistance, config.whisperDistance, config.shoutDistance);
         FerrovozNative.serverSetRoleRules(server, config.spectators, config.dead);
         FerrovozNative.serverSetMaxVoices(server, config.maxVoices);
+        FerrovozNative.serverSetCaveEcho(server, config.caveEcho);
         walls = new WallScheduler();
         // Silencios y grupos permanentes.
         FerrovozNative.serverSetDataFile(server, dataFile.toAbsolutePath().toString());

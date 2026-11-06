@@ -65,6 +65,7 @@
   "ferrovoz.settings.status.mic_blocked_mac": "Mikrofon ist stumm: erlaube es in Systemeinstellungen → Datenschutz → Mikrofon",
   "ferrovoz.settings.status.mic_blocked": "Mikrofon ist stumm: stummgeschaltet oder vom System blockiert?",
   "ferrovoz.settings.cave_echo": "Höhlenecho: %s",
+  "ferrovoz.settings.off_by_server": "Vom Server deaktiviert",
   "ferrovoz.settings.underwater": "Stimme unter Wasser: %s",
   "ferrovoz.settings.keys": "Tasten…",
   "ferrovoz.keys.title": "Ferrovoz · Tasten",

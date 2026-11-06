@@ -122,7 +122,9 @@ public final class VoiceSettingsScreen extends Screen {
                     FerrovozNative.clientSetMonitor(h(), monitor);
                 }));
         // Efectos del entorno
-        toggles.add(cycle(0, 0, half, () -> Component.translatable("ferrovoz.settings.cave_echo", onOff(config.caveEcho)),
+        // Si el servidor lo ha quitado se dice, pero el ajuste se guarda igual para otros servidores.
+        toggles.add(cycle(0, 0, half, () -> Component.translatable("ferrovoz.settings.cave_echo",
+                        FerrovozNative.clientCaveEchoAllowed(h()) ? onOff(config.caveEcho) : Component.translatable("ferrovoz.settings.off_by_server")),
                 b -> {
                     config.caveEcho = !config.caveEcho;
                     FerrovozNative.clientSetCaveEcho(h(), config.caveEcho);

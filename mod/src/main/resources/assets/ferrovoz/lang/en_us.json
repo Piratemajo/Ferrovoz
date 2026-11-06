@@ -65,6 +65,7 @@
   "ferrovoz.settings.status.mic_blocked_mac": "Mic input is silent: allow it in System Settings → Privacy → Microphone",
   "ferrovoz.settings.status.mic_blocked": "Mic input is silent: is it muted or blocked by the system?",
   "ferrovoz.settings.cave_echo": "Cave echo: %s",
+  "ferrovoz.settings.off_by_server": "Off by server",
   "ferrovoz.settings.underwater": "Underwater voice: %s",
   "ferrovoz.settings.keys": "Keys…",
   "ferrovoz.keys.title": "Ferrovoz · Keys",

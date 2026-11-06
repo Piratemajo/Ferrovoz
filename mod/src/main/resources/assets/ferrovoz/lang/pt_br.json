@@ -65,6 +65,7 @@
   "ferrovoz.settings.status.mic_blocked_mac": "O microfone está mudo: permita-o em Ajustes do Sistema → Privacidade → Microfone",
   "ferrovoz.settings.status.mic_blocked": "O microfone está mudo: está silenciado ou bloqueado pelo sistema?",
   "ferrovoz.settings.cave_echo": "Eco em cavernas: %s",
+  "ferrovoz.settings.off_by_server": "Desativado pelo servidor",
   "ferrovoz.settings.underwater": "Voz debaixo d'água: %s",
   "ferrovoz.settings.keys": "Teclas…",
   "ferrovoz.keys.title": "Ferrovoz · Teclas",

@@ -273,6 +273,8 @@ pub(crate) struct Shared {
     denoise: AtomicBool,
     /// Ajustes: reverb y efecto submarino.
     cave_echo: AtomicBool,
+    /// El servidor permite el eco (lo dice en cada Pong).
+    server_cave_echo: AtomicBool,
     underwater_fx: AtomicBool,
     /// El oyente tiene la cabeza bajo el agua.
     listener_underwater: AtomicBool,
@@ -378,6 +380,7 @@ impl VoiceClient {
             monitor: AtomicBool::new(false),
             denoise: AtomicBool::new(true),
             cave_echo: AtomicBool::new(true),
+            server_cave_echo: AtomicBool::new(true),
             underwater_fx: AtomicBool::new(true),
             listener_underwater: AtomicBool::new(false),
             vad_threshold: AtomicF32::new(0.02),
@@ -571,6 +574,11 @@ impl VoiceClient {
         self.shared.cave_echo.store(enabled, Ordering::Relaxed);
     }
 
+    /// false si el servidor ha desactivado el eco para todos.
+    pub fn cave_echo_allowed(&self) -> bool {
+        self.shared.server_cave_echo.load(Ordering::Relaxed)
+    }
+
     /// Efecto submarino (por defecto activado).
     pub fn set_underwater_effect(&self, enabled: bool) {
         self.shared.underwater_fx.store(enabled, Ordering::Relaxed);
@@ -753,6 +761,11 @@ impl Drop for VoiceClient {
 }
 
 impl Shared {
+    /// Eco activado por el jugador y permitido por el servidor.
+    fn cave_echo_on(&self) -> bool {
+        self.cave_echo.load(Ordering::Relaxed) && self.server_cave_echo.load(Ordering::Relaxed)
+    }
+
     pub(crate) fn is_running(&self) -> bool {
         self.running.load(Ordering::Relaxed)
     }
@@ -869,7 +882,9 @@ impl Shared {
                     self.rtt_ms.store(sent.elapsed().as_millis().min(10_000) as u32, Ordering::Relaxed);
                 }
                 // Ajuste de bitrate y FEC según la pérdida.
-                let loss = PongInfo::decode(&body).loss_percent;
+                let pong = PongInfo::decode(&body);
+                self.server_cave_echo.store(!pong.no_cave_echo, Ordering::Relaxed);
+                let loss = pong.loss_percent;
                 self.loss_percent.store(loss as u32, Ordering::Relaxed);
                 self.target_bitrate.store(bitrate_for_loss(loss), Ordering::Relaxed);
             }
@@ -1013,7 +1028,7 @@ impl Shared {
         self.talking.store(send, Ordering::Relaxed);
 
         // Voz propia hacia la reverb (solo la parte húmeda).
-        if send && self.cave_echo.load(Ordering::Relaxed) {
+        if send && self.cave_echo_on() {
             let mut mixer = self.mixer.lock().unwrap();
             if mixer.listener_env.0 > 0.0 {
                 mixer.self_echo.extend(cap.frame.iter().copied());
@@ -1093,7 +1108,7 @@ impl Shared {
 
         mixer.speakers.retain(|_, s| now.duration_since(s.last_packet) < SPEAKER_TIMEOUT);
 
-        let cave_echo = self.cave_echo.load(Ordering::Relaxed);
+        let cave_echo = self.cave_echo_on();
         let water_fx = self.underwater_fx.load(Ordering::Relaxed);
         let me_underwater = water_fx && self.listener_underwater.load(Ordering::Relaxed);
         let (listener_wet, listener_room) = mixer.listener_env;

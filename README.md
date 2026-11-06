@@ -13,7 +13,7 @@ Java solo hace de pegamento con el juego; captura, códec, red, cifrado, mezcla 
 - **El sonido rodea**: si la línea recta está tapada pero hay un camino abierto (una puerta, una ventana, doblar una esquina), la voz llega también por ahí, más clara que a través del muro y **desde el hueco**. Cada esquina la baja y le quita agudos (los graves rodean mejor). Se busca con A* por los bloques donde pasa el sonido (puertas y trampillas abiertas, plantas, agua…) y después se "tira de la cuerda" para quedarse con las esquinas de verdad; como mucho 2000 bloques y un camino por tick, así que cuesta 1–2 ms y no se nota. Las puertas cerradas, el cristal y las vallas tapan la mitad que un bloque macizo.
 - **Paredes que amortiguan**: con bloques sólidos entre medias la voz suena más baja y apagada (se filtran los agudos). Si quien habla está fuera de tu distancia de renderizado, las calcula el servidor (Fabric, Paper y Spigot; en Folia solo el cliente), con un coste fijo por tick: como mucho 300 líneas, las parejas más cercanas primero, y sin recalcular si nadie se ha movido de bloque. Con 250 personas juntas y 100 hablando: 0,2 ms por tick de media.
 - **Multitudes y eventos**: a partir de unas 20 voces a la vez ya no se distingue a nadie, y mandarlas todas a todos satura el servidor. Si a una zona (cubos de 8 bloques) le llegan más de `max_voices` voces (24 por defecto), sus jugadores reciben por separado las 24 más cercanas, con audio 3D, paredes y eco, y el resto **mezclado en el servidor como el murmullo de la multitud**, que suena desde donde está el grueso de la gente: no desaparece nadie. La mezcla se hace por zona, no por jugador, así que cuesta poco aunque haya cientos. Quien tenga `ferrovoz.priority` (por defecto, operadores) **se oye siempre por separado**, aunque hable toda la plaza: para quien presenta el evento. Con menos voces que el límite no cambia nada, y funciona con clientes de cualquier versión.
-- **Eco según la forma del sitio**: la voz resuena si tú **o quien habla** estáis en una cueva o sala cerrada. 42 rayos miden la sala: la duración del eco sale de su tamaño y sus materiales (Sabine: un cuarto de piedra ~1,1 s, una caverna hasta 3,5 s, una sala de lana 0,25 s), la lana y la madera además se comen los agudos, y los **primeros ecos** llegan de las paredes cercanas, desde su lado y con su retardo de ida y vuelta (una pared a 6 bloques: 35 ms). Al aire libre, sin eco. Y al hablar tú dentro, **oyes tu propio eco** (solo el rebote, no tu voz directa). Se puede desactivar en Ajustes (J).
+- **Eco según la forma del sitio**: la voz resuena si tú **o quien habla** estáis en una cueva o sala cerrada. 42 rayos miden la sala: la duración del eco sale de su tamaño y sus materiales (Sabine: un cuarto de piedra ~1,1 s, una caverna hasta 3,5 s, una sala de lana 0,25 s), la lana y la madera además se comen los agudos, y los **primeros ecos** llegan de las paredes cercanas, desde su lado y con su retardo de ida y vuelta (una pared a 6 bloques: 35 ms). Al aire libre, sin eco. Y al hablar tú dentro, **oyes tu propio eco** (solo el rebote, no tu voz directa). Cada jugador lo puede desactivar en Ajustes (J), y el servidor para todos (`cave_echo=false`).
 - **Voz bajo el agua**: si quien habla tiene la cabeza sumergida, o la tienes tú, la voz llega como bajo el agua: sin agudos, hueca, con el tono ondulando como el agua en movimiento y un leve burbujeo. Con los dos sumergidos, aún más tapada. Entra y sale poco a poco, sin chasquidos. También se puede desactivar en Ajustes (J). Lo de quien habla lo calcula el servidor con el juego, así que funciona aunque esté fuera de tu vista.
 - **Volumen por jugador**: baja o silencia a alguien solo para ti (J → Jugadores…). Se guarda.
 - **Volumen de grupo** aparte del de proximidad (J): la "radio" del grupo y quien tienes al lado, cada uno a su volumen.
@@ -113,7 +113,7 @@ Java solo hace de pegamento con el juego; captura, códec, red, cifrado, mezcla 
 Necesitas **Rust** (stable), **JDK 25** y, en Linux, `libasound2-dev` y `cmake`.
 
 ```bash
-cd native && cargo test          # 141 tests: unitarios + extremo a extremo por red (incluidos ataques)
+cd native && cargo test          # 142 tests: unitarios + extremo a extremo por red (incluidos ataques)
 cd ../mod && ./gradlew build     # compila Rust (con y sin audio) y lo mete en el .jar
 ```
 
@@ -201,6 +201,7 @@ transport=auto        # auto = UDP y, si no llega, túnel · udp = solo UDP · t
 spectators=ghost      # espectadores: ghost (por defecto) · normal · listen · own · off (ver «Espectadores y muertos»)
 dead=normal           # muertos: igual
 max_voices=24         # voces por separado como mucho en cada zona; el resto, al murmullo (0 = sin límite)
+cave_echo=true        # eco en cuevas y salas; false lo quita a todos aunque lo tengan activado
 ```
 
 ### Detrás de un proxy (Velocity, BungeeCord…)
@@ -304,4 +305,4 @@ Ferrovoz es MIT. El jar incluye `META-INF/THIRD_PARTY_LICENSES.txt` con las lice
 cd native && cargo test --release
 ```
 
-141 tests: unitarios (audio, cifrado, jitter buffer, HRTF, reverb, AEC/AGC, mezcla de multitudes...) y de extremo a extremo con un relé real por UDP en localhost: alcances, grupos, permisos, túnel, pérdida de paquetes, ataques de replay y flood, reglas de espectadores, repeticiones, multitudes y anfitrión, y voz a través del proxy. La prueba de carga está en [Rendimiento](#rendimiento).
+142 tests: unitarios (audio, cifrado, jitter buffer, HRTF, reverb, AEC/AGC, mezcla de multitudes...) y de extremo a extremo con un relé real por UDP en localhost: alcances, grupos, permisos, túnel, pérdida de paquetes, ataques de replay y flood, reglas de espectadores, repeticiones, multitudes y anfitrión, y voz a través del proxy. La prueba de carga está en [Rendimiento](#rendimiento).

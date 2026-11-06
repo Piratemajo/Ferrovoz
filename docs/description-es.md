@@ -68,6 +68,7 @@ Funciona como mod de **Fabric, NeoForge y Forge**, como plugin de **Paper, Purpu
 - Códec **Opus** con calidad automática: 32 kbps con buena conexión, hasta 14 kbps con más protección si se pierden paquetes.
 - **Medido en un servidor de Fabric real** con 100 jugadores en el mismo sitio y 20 hablando a la vez: Ferrovoz añadió **0,57 ms por tick de media** (en torno al 1 % del tiempo de cada tick), el servidor se mantuvo a **20 TPS** y llegó el **99,9 %** de la voz.
 - **Preparado para eventos grandes**: si a una zona le llegan más de 24 voces a la vez (`max_voices`), cada jugador oye por separado las más cercanas y el resto como el **murmullo de la multitud**, mezclado en el servidor. Nadie desaparece y el servidor aguanta: en una prueba con 250 personas juntas y 150 hablando, sin esto llegaba el 31 % de la voz; con esto, toda. Quien presenta el evento (`ferrovoz.priority`) se oye siempre.
+- **Eco opcional**: cada jugador lo puede quitar en sus ajustes, y el servidor para todos con `cave_echo=false`.
 
 ---
 

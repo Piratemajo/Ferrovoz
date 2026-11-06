@@ -261,6 +261,9 @@ public final class FerrovozNative {
     public static native void serverSetPriority(long handle, long uuidMsb, long uuidLsb, boolean priority);
     /** Voces por separado como mucho en cada zona; las demás se mezclan en el murmullo (0 = sin límite). */
     public static native void serverSetMaxVoices(long handle, int maxVoices);
+
+    /** Eco de cuevas y salas para todos; los clientes se enteran en 2 s como mucho. */
+    public static native void serverSetCaveEcho(long handle, boolean enabled);
     /** Varias oclusiones de golpe: {@code pairs} = [hablante msb, lsb, oyente msb, lsb, ...], {@code amounts} una por pareja. */
     public static native void serverSetOcclusions(long handle, long[] pairs, float[] amounts);
     public static native boolean serverIsMuted(long handle, long uuidMsb, long uuidLsb);
@@ -298,6 +301,9 @@ public final class FerrovozNative {
     // --- Efectos que el jugador puede desactivar ---
     /** Reverb en cuevas y salas. */
     public static native void clientSetCaveEcho(long handle, boolean enabled);
+
+    /** false si el servidor ha desactivado el eco para todos. */
+    public static native boolean clientCaveEchoAllowed(long handle);
     /** Efecto submarino. */
     public static native void clientSetUnderwaterEffect(long handle, boolean enabled);
 

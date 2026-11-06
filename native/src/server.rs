@@ -290,6 +290,9 @@ struct State {
     crowd_plans: HashMap<Cell, HashSet<PlayerId>>,
     /// Tramas que esperan a mezclarse en el murmullo.
     crowd_stash: crowd::Stash,
+    /// Eco de cuevas y salas permitido. Si no, la voz se reenvía sin el sitio del
+    /// hablante y el Pong avisa a los clientes para que apaguen también el suyo.
+    cave_echo: bool,
 }
 
 struct Shared {
@@ -332,6 +335,7 @@ impl VoiceServer {
                 max_voices: 0,
                 crowd_plans: HashMap::new(),
                 crowd_stash: crowd::Stash::default(),
+                cave_echo: true,
             }),
             running: AtomicBool::new(true),
             stats: ServerStats::default(),
@@ -506,6 +510,12 @@ impl VoiceServer {
         if max == 0 {
             st.crowd_plans.clear();
         }
+    }
+
+    /// Eco de cuevas y salas para todos (por defecto, sí). Los clientes se enteran
+    /// en el siguiente Pong, como mucho en 2 s.
+    pub fn set_cave_echo(&self, enabled: bool) {
+        self.state().cave_echo = enabled;
     }
 
     pub fn set_max_distance(&self, d: f32) {
@@ -1217,6 +1227,7 @@ impl Shared {
                 return Err(());
             }
         }
+        let cave_echo = st.cave_echo;
         let Some(sender) = st.players.get_mut(&sender_id) else {
             Self::note_bad_packet(st, source);
             return Err(());
@@ -1257,7 +1268,7 @@ impl Shared {
                         }
                     }
                 }
-                let pong = PongInfo { loss_percent: sender.loss.percent }.encode();
+                let pong = PongInfo { loss_percent: sender.loss.percent, no_cave_echo: !cave_echo }.encode();
                 let pkt = sender.seal(PacketType::Pong, &pong);
                 deliver(&self.stats, sender, pkt, out);
                 if first || raw.kind == PacketType::Hello {
@@ -1275,7 +1286,9 @@ impl Shared {
                 }
                 let frame = AudioUp::decode(&body).map_err(|_| ())?;
                 sender.loss.record(frame.seq);
-                sender.env = frame.env;
+                // Sin eco en el servidor, la voz sale sin el sitio del hablante: así
+                // tampoco lo oyen los clientes antiguos.
+                sender.env = if cave_echo { frame.env } else { Environment::default() };
                 if !sender.can_speak || st.admin_muted.contains(&sender_id) {
                     return Ok(()); // silenciado: se acepta pero no se reenvía
                 }

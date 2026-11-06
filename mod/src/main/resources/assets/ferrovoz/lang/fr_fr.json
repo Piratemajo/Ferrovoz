@@ -65,6 +65,7 @@
   "ferrovoz.settings.status.mic_blocked_mac": "Le micro est muet : autorisez-le dans Réglages Système → Confidentialité → Microphone",
   "ferrovoz.settings.status.mic_blocked": "Le micro est muet : est-il coupé ou bloqué par le système ?",
   "ferrovoz.settings.cave_echo": "Écho des grottes : %s",
+  "ferrovoz.settings.off_by_server": "Désactivé par le serveur",
   "ferrovoz.settings.underwater": "Voix sous l'eau : %s",
   "ferrovoz.settings.keys": "Touches…",
   "ferrovoz.keys.title": "Ferrovoz · Touches",
