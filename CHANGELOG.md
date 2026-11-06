@@ -3,6 +3,10 @@
 Formato: una sección `## [versión]` por versión. Al publicar, el CI copia la
 sección de esa versión como notas de la release.
 
+## [Sin publicar]
+
+- **Retraso de la voz según la red de cada uno**: el colchón antes de reproducir cada frase ya no es fijo (60 ms), se ajusta a la conexión de quien habla. Con buena red baja a 40 ms (la conversación se siente más inmediata) y con Wi-Fi malo o datos móviles sube lo necesario, hasta 160 ms, para que la voz no se corte. Si un paquete llega tarde a media frase se espera por él en vez de tirarlo. En una red simulada muy inestable los cortes bajan del 14 % al 0 %. Solo cambia el cliente: funciona con servidores de cualquier versión.
+
 ## [0.11.0]
 
 - **Minecraft 1.21.1**: Ferrovoz funciona también en 1.21.1, con las mismas funciones. Un solo jar, como en 26.3, para Fabric, NeoForge 21.1, Forge 52, Paper/Spigot y Velocity/BungeeCord. En Fabric 1.21.1 los permisos usan `fabric-permissions-api` (LuckPerms), con los mismos nodos `ferrovoz.*`.

@@ -63,6 +63,7 @@ Java solo hace de pegamento con el juego; captura, códec, red, cifrado, mezcla 
 - **Sin puerto UDP**: si el UDP no llega en 3 s (host que no deja abrir puertos), la voz pasa sola por la conexión del juego (*túnel*). Se envía desde un hilo propio cada 5 ms (no al ritmo de los ticks), así que solo añade la espera de recepción del servidor. Se puede forzar con `transport=tunnel`.
 - **Seguridad**: cada paquete lleva un contador y los repetidos se rechazan (*anti-replay*, como WireGuard): nadie puede reenviar tu voz ni desviarla. Límite de tráfico por jugador y por IP contra inundaciones.
 - **Calidad automática**: el servidor mide la pérdida de paquetes de cada jugador y el cliente ajusta Opus: 32 kbps en buena red, hasta 14 kbps con más protección si se pierden paquetes.
+- **Retraso según tu red**: antes de reproducir cada frase se guarda un pequeño colchón, y su tamaño se ajusta a la conexión de cada persona. Se mide con qué retraso llegan sus paquetes y se espera lo justo para cubrir el 97 %: con fibra o cable, 40 ms; con Wi-Fi malo o datos móviles, hasta 160 ms para que no se corte. Si un paquete llega tarde a media frase se espera por él en vez de tirarlo. En una red simulada con ±120 ms de variación los cortes bajan del 14 % al 0 %, y con buena red el retraso baja de ~60 a ~40 ms.
 - **Opus** con FEC, **ChaCha20-Poly1305** por jugador, **jitter buffer** de 60 ms.
 - **Limpieza del micro**, en este orden: cancelación de eco (AEC3 de WebRTC, en Rust) → paso alto a 80 Hz + RNNoise (Rust puro) + puerta de ruido → ganancia automática. Medido: ventilador −63 dB, zumbido de 50 Hz −38 dB, siseo −26 dB en la trama típica.
 - El servidor **no decodifica audio**: reenvía bytes Opus, así que aguanta muchos jugadores con muy poca CPU.
@@ -110,7 +111,7 @@ Java solo hace de pegamento con el juego; captura, códec, red, cifrado, mezcla 
 Necesitas **Rust** (stable), **JDK 25** y, en Linux, `libasound2-dev` y `cmake`.
 
 ```bash
-cd native && cargo test          # 122 tests: unitarios + extremo a extremo por red (incluidos ataques)
+cd native && cargo test          # 129 tests: unitarios + extremo a extremo por red (incluidos ataques)
 cd ../mod && ./gradlew build     # compila Rust (con y sin audio) y lo mete en el .jar
 ```
 
@@ -296,4 +297,4 @@ Ferrovoz es MIT. El jar incluye `META-INF/THIRD_PARTY_LICENSES.txt` con las lice
 cd native && cargo test --release
 ```
 
-122 tests: unitarios (audio, cifrado, jitter buffer, HRTF, reverb, AEC/AGC...) y de extremo a extremo con un relé real por UDP en localhost: alcances, grupos, permisos, túnel, pérdida de paquetes, ataques de replay y flood, reglas de espectadores, repeticiones y voz a través del proxy. La prueba de carga está en [Rendimiento](#rendimiento).
+129 tests: unitarios (audio, cifrado, jitter buffer, HRTF, reverb, AEC/AGC...) y de extremo a extremo con un relé real por UDP en localhost: alcances, grupos, permisos, túnel, pérdida de paquetes, ataques de replay y flood, reglas de espectadores, repeticiones y voz a través del proxy. La prueba de carga está en [Rendimiento](#rendimiento).
