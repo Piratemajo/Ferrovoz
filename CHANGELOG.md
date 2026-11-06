@@ -3,7 +3,7 @@
 Formato: una sección `## [versión]` por versión. Al publicar, el CI copia la
 sección de esa versión como notas de la release.
 
-## [Sin publicar]
+## [0.11.0]
 
 - **Minecraft 1.21.1**: Ferrovoz funciona también en 1.21.1, con las mismas funciones. Un solo jar, como en 26.3, para Fabric, NeoForge 21.1, Forge 52, Paper/Spigot y Velocity/BungeeCord. En Fabric 1.21.1 los permisos usan `fabric-permissions-api` (LuckPerms), con los mismos nodos `ferrovoz.*`.
 - Arreglado: el juego o el servidor podían cerrarse de golpe (fallo de memoria) al parar la voz mientras llegaba voz por el túnel: al apagar el servidor, al cambiar de servidor o al desactivar la voz en J (sobre todo en NeoForge y Forge).
