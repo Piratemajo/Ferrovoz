@@ -10,3 +10,6 @@ native/out/
 mod-1.21.1/build/
 mod-1.21.1/.gradle/
 mod-1.21.1/run/
+javac.*.args
+*.class
+hs_err_pid*.log

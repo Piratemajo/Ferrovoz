@@ -29,6 +29,15 @@ sonora = { version = "0.2", optional = true }
 # Reenviador del proxy: un socket UDP por jugador en un solo hilo.
 mio = { version = "1", features = ["os-poll", "net"] }
 
+# Opus y el DSP sin optimizar van decenas de veces más lentos y las pruebas con
+# muchos clientes no llegan a tiempo real. Se mantienen las comprobaciones de
+# desbordamiento y los debug_assert.
+[profile.test]
+opt-level = 2
+
+[profile.dev.package."*"]
+opt-level = 3
+
 [profile.release]
 opt-level = 3
 lto = true

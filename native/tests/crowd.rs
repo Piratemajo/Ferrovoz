@@ -60,19 +60,23 @@ impl Crowd {
         for t in &self.talkers {
             t.set_push_to_talk(true);
         }
+        // Solo mezcla el oyente: los que hablan no necesitan oír nada, y mezclar 31
+        // clientes en este hilo no llega a tiempo real en una máquina lenta.
         let mut out = vec![0f32; FRAME_SAMPLES * 2];
         let mut energy = 0f32;
-        for n in 0..75 {
+        let start = Instant::now();
+        for n in 0..75u32 {
             for (k, t) in self.talkers.iter().enumerate() {
-                t.push_capture(&sine_frame(n, 200.0 + 20.0 * k as f32));
+                t.push_capture(&sine_frame(n as usize, 200.0 + 20.0 * k as f32));
             }
-            std::thread::sleep(Duration::from_millis(20));
+            // A ritmo de reloj: si una vuelta se retrasa, la siguiente no espera.
+            let next = start + Duration::from_millis(20) * (n + 1);
+            if let Some(wait) = next.checked_duration_since(Instant::now()) {
+                std::thread::sleep(wait);
+            }
             self.listener.render(&mut out);
             if n > 40 {
                 energy += out.iter().map(|s| s * s).sum::<f32>();
-            }
-            for t in &self.talkers {
-                t.render(&mut out);
             }
         }
         let heard: HashSet<[u8; 16]> = self.listener.speaking_players().into_iter().map(|(id, _)| id).collect();
