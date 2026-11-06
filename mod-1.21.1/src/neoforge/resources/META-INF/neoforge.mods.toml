@@ -1,4 +1,4 @@
-# Ferrovoz en NeoForge 1.21.1. El mismo jar trae META-INF/mods.toml (Forge) y plugin.yml (Paper).
+# Ferrovoz en NeoForge 1.21.1. El mismo jar trae fabric.mod.json (Fabric), META-INF/mods.toml (Forge) y plugin.yml (Paper).
 modLoader="javafml"
 loaderVersion="[1,)"
 license="MIT"

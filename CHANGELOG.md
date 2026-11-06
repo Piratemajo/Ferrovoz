@@ -5,7 +5,7 @@ sección de esa versión como notas de la release.
 
 ## [Sin publicar]
 
-- **Minecraft 1.21.1**: Ferrovoz funciona también en 1.21.1, con las mismas funciones. Salen dos jars: `-fabric` (Fabric) y `-neoforge` (NeoForge 21.1 y Forge 52); los dos valen además como plugin de Paper/Spigot y de Velocity/BungeeCord. En Fabric 1.21.1 los permisos usan `fabric-permissions-api` (LuckPerms), con los mismos nodos `ferrovoz.*`.
+- **Minecraft 1.21.1**: Ferrovoz funciona también en 1.21.1, con las mismas funciones. Un solo jar, como en 26.3, para Fabric, NeoForge 21.1, Forge 52, Paper/Spigot y Velocity/BungeeCord. En Fabric 1.21.1 los permisos usan `fabric-permissions-api` (LuckPerms), con los mismos nodos `ferrovoz.*`.
 - Arreglado: el juego o el servidor podían cerrarse de golpe (fallo de memoria) al parar la voz mientras llegaba voz por el túnel: al apagar el servidor, al cambiar de servidor o al desactivar la voz en J (sobre todo en NeoForge y Forge).
 - Arreglado: tras morir y reaparecer, las paredes que calcula el servidor se medían desde donde moriste hasta volver a entrar (Fabric, NeoForge y Forge).
 - Arreglado: un valor mal escrito en `ferrovoz.properties` o `ferrovoz-proxy.properties` (por ejemplo `max_distance=48,5`) devolvía a sus valores por defecto los ajustes que venían detrás y reescribía el archivo. Ahora solo ese valor usa el de por defecto, se avisa en el log y el archivo no se toca. Se admite la coma decimal.

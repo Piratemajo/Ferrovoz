@@ -4,12 +4,32 @@
 // Rust, protocolo, configuración, comandos, mensajes, plugin de Paper y de proxy...)
 // y solo tiene aquí la capa que habla con el juego (src/).
 //
-// En 1.21.1 Fabric usa nombres ofuscados (intermediary) y NeoForge/Forge los de
-// Mojang, así que salen dos jars:
-//   build/libs/ferrovoz-1.21.1-<versión>-fabric.jar    Fabric + Paper/Spigot + Velocity/BungeeCord
-//   build/libs/ferrovoz-1.21.1-<versión>-neoforge.jar  NeoForge + Forge + Paper/Spigot + Velocity/BungeeCord
+// Sale un solo jar, build/libs/ferrovoz-1.21.1-<versión>.jar, para Fabric, NeoForge,
+// Forge, Paper/Spigot y Velocity/BungeeCord. En 1.21.1 Fabric usa nombres ofuscados
+// (intermediary) y NeoForge/Forge los de Mojang, así que el jar lleva dos copias de
+// las clases que tocan el juego: la de Mojang en dev.ferrovoz y la de Fabric en
+// dev.ferrovoz.intermediary (ver relocateFabric).
 //
 // Se compila con Java 21: ./gradlew build
+
+import org.objectweb.asm.ClassReader
+import org.objectweb.asm.ClassWriter
+import org.objectweb.asm.commons.ClassRemapper
+import org.objectweb.asm.commons.Remapper
+
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+import java.util.zip.ZipOutputStream
+
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        // Para mover la copia de Fabric a su propio paquete (relocateFabric).
+        classpath 'org.ow2.asm:asm-commons:9.7.1'
+    }
+}
 
 plugins {
     // Plugin de Loom que remapea (1.21.1 todavía viene ofuscado).
@@ -234,11 +254,12 @@ tasks.register('copyNative', Copy) {
 sourceSets.main.resources.srcDir(generatedNatives)
 sourceSets.main.resources.srcDir(file('../mod/natives-prebuilt'))
 
-// --- Jars ---
-// jar y remapJar son pasos intermedios (van a build/intermediate); los jars para
-// publicar son fabricJar y neoforgeJar.
-
-def finalName = { String loader -> "ferrovoz-${project.minecraft_version}-${project.version}-${loader}.jar".toString() }
+// --- Jar ---
+// jar y remapJar son pasos intermedios (van a build/intermediate). El jar final lo
+// hace universalJar:
+//   - clases con nombres de Mojang (NeoForge, Forge, y las que no tocan el juego),
+//   - la copia remapeada para Fabric, movida a dev.ferrovoz.intermediary,
+//   - Paper/Spigot y Velocity/BungeeCord.
 
 jar {
     destinationDirectory = layout.buildDirectory.dir('intermediate')
@@ -248,46 +269,101 @@ remapJar {
     destinationDirectory = layout.buildDirectory.dir('intermediate')
 }
 
-def commonJarSetup = { Jar t ->
-    t.group = 'build'
-    t.duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    t.from(sourceSets.bukkit.output)
-    t.from(sourceSets.proxy.output)
-    t.from('../LICENSE') {
+/**
+ * Nombre de una clase en la copia de Fabric. FerrovozNative no se mueve: Rust enlaza
+ * sus métodos nativos por nombre (Java_dev_ferrovoz_FerrovozNative_...). Tampoco
+ * FerrovozLog, que es lo único que usa. Las dos no tocan el juego y valen para todos.
+ */
+static String fabricName(String name) {
+    String base = 'dev/ferrovoz/'
+    if (!name.startsWith(base)) return name
+    String rest = name.substring(base.length())
+    String top = rest.contains('$') ? rest.substring(0, rest.indexOf('$')) : rest
+    if (top == 'FerrovozNative' || top == 'FerrovozLog') return name
+    return base + 'intermediary/' + rest
+}
+
+def relocatedFabricJar = layout.buildDirectory.file('intermediate/fabric-relocated.jar')
+
+// Toma el jar remapeado de Fabric y mueve sus clases a dev.ferrovoz.intermediary,
+// para que quepan en el mismo jar que las de NeoForge/Forge. Solo se queda con las
+// clases, fabric.mod.json (apuntando a las clases movidas) y los jars anidados
+// (fabric-permissions-api); los recursos vienen de la copia común.
+tasks.register('relocateFabric') {
+    dependsOn remapJar
+    def input = remapJar.archiveFile
+    inputs.file(input)
+    outputs.file(relocatedFabricJar)
+    doLast {
+        Remapper remapper = new Remapper() {
+            @Override
+            String map(String internalName) {
+                return fabricName(internalName)
+            }
+        }
+        File out = relocatedFabricJar.get().asFile
+        out.parentFile.mkdirs()
+        new ZipFile(input.get().asFile).withCloseable { ZipFile zip ->
+            new ZipOutputStream(new FileOutputStream(out)).withCloseable { ZipOutputStream zout ->
+                def put = { String name, byte[] data ->
+                    zout.putNextEntry(new ZipEntry(name))
+                    zout.write(data)
+                    zout.closeEntry()
+                }
+                for (ZipEntry e : Collections.list(zip.entries())) {
+                    if (e.directory) continue
+                    String name = e.name
+                    byte[] data = zip.getInputStream(e).bytes
+                    if (name.startsWith('dev/ferrovoz/') && name.endsWith('.class')) {
+                        String cls = name.substring(0, name.length() - '.class'.length())
+                        String target = fabricName(cls)
+                        if (target == cls) continue // FerrovozNative/FerrovozLog: los de la copia común
+                        ClassWriter writer = new ClassWriter(0)
+                        new ClassReader(data).accept(new ClassRemapper(writer, remapper), 0)
+                        put(target + '.class', writer.toByteArray())
+                    } else if (name == 'fabric.mod.json') {
+                        String json = new String(data, 'UTF-8')
+                                .replace('"dev.ferrovoz.fabric.', '"dev.ferrovoz.intermediary.fabric.')
+                        put(name, json.getBytes('UTF-8'))
+                    } else if (name.startsWith('META-INF/jars/')) {
+                        put(name, data)
+                    }
+                }
+            }
+        }
+    }
+}
+
+tasks.register('universalJar', Jar) {
+    description = 'Jar de Ferrovoz para Minecraft 1.21.1 (Fabric, NeoForge, Forge, Paper y proxies)'
+    group = 'build'
+    dependsOn 'relocateFabric'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    // Nombres de Mojang: NeoForge, Forge y lo común (las clases de Fabric van en la copia movida).
+    from(sourceSets.main.output) {
+        exclude 'fabric.mod.json', 'dev/ferrovoz/fabric/**'
+    }
+    from(sourceSets.client.output) {
+        exclude 'dev/ferrovoz/fabric/**'
+    }
+    from(sourceSets.neoforge.output)
+    from(sourceSets.forge.output)
+    from(zipTree(relocatedFabricJar))
+    from(sourceSets.bukkit.output)
+    from(sourceSets.proxy.output)
+    from('../LICENSE') {
         rename { "${it}_${project.base.archivesName.get()}" }
     }
-    t.manifest {
+    manifest {
         // El plugin de Paper no toca clases internas del servidor: no hace falta remapearlo.
         attributes 'paperweight-mappings-namespace': 'mojang'
     }
-    t.destinationDirectory = layout.buildDirectory.dir('libs')
-}
-
-// Fabric: clases remapeadas a intermediary (lo que hace remapJar) + Paper + proxy.
-tasks.register('fabricJar', Jar) {
-    description = 'Jar de Fabric (y Paper/proxy) para Minecraft 1.21.1'
-    dependsOn remapJar
-    commonJarSetup(it)
-    from(zipTree(remapJar.archiveFile)) {
-        exclude 'META-INF/MANIFEST.MF'
-    }
-    archiveFileName = finalName('fabric')
-}
-
-// NeoForge y Forge: las clases tal cual (nombres de Mojang), sin las de Fabric.
-tasks.register('neoforgeJar', Jar) {
-    description = 'Jar de NeoForge y Forge (y Paper/proxy) para Minecraft 1.21.1'
-    commonJarSetup(it)
-    from(sourceSets.main.output)
-    from(sourceSets.client.output)
-    from(sourceSets.neoforge.output)
-    from(sourceSets.forge.output)
-    exclude 'fabric.mod.json', 'dev/ferrovoz/fabric/**'
-    archiveFileName = finalName('neoforge')
+    destinationDirectory = layout.buildDirectory.dir('libs')
+    archiveFileName = "ferrovoz-${project.minecraft_version}-${project.version}.jar".toString()
 }
 
 tasks.named('assemble') {
-    dependsOn 'fabricJar', 'neoforgeJar'
+    dependsOn 'universalJar'
 }
 
 tasks.withType(JavaCompile).configureEach {

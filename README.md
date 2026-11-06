@@ -116,7 +116,7 @@ cd ../mod && ./gradlew build     # compila Rust (con y sin audio) y lo mete en e
 
 En Windows, `gradlew.bat build`. El jar sale en `mod/build/libs/ferrovoz-<Minecraft>-<versión>.jar`.
 
-**Lo normal es dejar que lo compile GitHub:** el repo es público, así que Actions es gratis en todos los sistemas. Cada push a `main` (y cada pull request) pasa los tests en las 5 plataformas y deja los **jars** (el universal de 26.3 y los dos de 1.21.1) en la página de la ejecución (Actions → la ejecución → *Artifacts* → `ferrovoz`). Los cambios que solo tocan `.md` o `docs/` no lo lanzan.
+**Lo normal es dejar que lo compile GitHub:** el repo es público, así que Actions es gratis en todos los sistemas. Cada push a `main` (y cada pull request) pasa los tests en las 5 plataformas y deja los **jars** (el de 26.3 y el de 1.21.1) en la página de la ejecución (Actions → la ejecución → *Artifacts* → `ferrovoz-mod`). Los cambios que solo tocan `.md` o `docs/` no lo lanzan.
 
 **El jar local solo lleva los binarios de tu sistema.** Si lo compilas en Windows, no tendrá voz en un servidor Linux (casi todos los hostings) ni en un Mac. Sirve para probar rápido; para meter más plataformas, pon sus dos archivos en `mod/natives-prebuilt/natives/<plataforma>/` antes de `./gradlew build`:
 
@@ -154,12 +154,7 @@ Se compila con **JDK 21** (el de Minecraft 1.21.1):
 cd mod-1.21.1 && ./gradlew build
 ```
 
-En 1.21.1 Fabric usa los nombres ofuscados de Minecraft y NeoForge/Forge los de Mojang, así que salen **dos jars** en `mod-1.21.1/build/libs/`:
-
-| Jar | Vale para |
-|---|---|
-| `ferrovoz-1.21.1-<versión>-fabric.jar` | Fabric (cliente y servidor), Paper/Spigot/Purpur/Folia, Velocity/BungeeCord |
-| `ferrovoz-1.21.1-<versión>-neoforge.jar` | NeoForge 21.1, Forge 52, Paper/Spigot/Purpur/Folia, Velocity/BungeeCord |
+Sale un solo jar, `mod-1.21.1/build/libs/ferrovoz-1.21.1-<versión>.jar`, igual que en 26.3: Fabric, NeoForge 21.1, Forge 52, Paper/Spigot/Purpur/Folia y Velocity/BungeeCord. Como en 1.21.1 Fabric usa los nombres ofuscados de Minecraft y NeoForge/Forge los de Mojang, el jar lleva dos copias de las clases que tocan el juego: la de Mojang en `dev.ferrovoz` y la de Fabric en `dev.ferrovoz.intermediary` (la tarea `relocateFabric`). `FerrovozNative` y `FerrovozLog` no se duplican.
 
 Los binarios nativos de otras plataformas se leen de la misma carpeta que la 26.3 (`mod/natives-prebuilt/`). Diferencias con la 26.3: en Fabric los permisos usan `fabric-permissions-api` (la de LuckPerms, va dentro del jar) con los mismos nodos `ferrovoz.*`; el resto funciona igual. El protocolo de voz es el mismo, así que el plugin de proxy sirve para redes con servidores de las dos versiones.
 
@@ -177,7 +172,7 @@ El CI compila todo, comprueba que la etiqueta coincide con `mod_version`, que el
 
 ## Instalación
 
-Para Minecraft 26.3, el mismo `.jar` vale para todo. Para 1.21.1 hay dos: el `-fabric` para Fabric y el `-neoforge` para NeoForge y Forge (los dos valen también como plugin de Paper y de proxy). Lo demás es igual:
+Hay un `.jar` por versión de Minecraft (26.3 y 1.21.1), y cada uno vale para todo:
 
 | Dónde | Cargador | Dónde va el jar | Además | Configuración |
 |---|---|---|---|---|
