@@ -9,8 +9,8 @@ import dev.ferrovoz.client.VoiceHud;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
+import net.minecraftforge.client.event.CustomizeGuiOverlayEvent;
 import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
-import net.minecraftforge.client.event.RenderGuiEvent;
 import net.minecraftforge.client.event.RenderPlayerEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
@@ -34,8 +34,9 @@ final class FerrovozForgeClient implements FerrovozClient.Platform {
         });
 
         IEventBus game = MinecraftForge.EVENT_BUS;
-        // HUD encima de todo lo demás.
-        game.addListener((RenderGuiEvent.Post e) -> VoiceHud.render(e.getGuiGraphics()));
+        // Forge 52 no tiene un evento general para el HUD: se usa el del chat, que salta
+        // en cada fotograma mientras se dibuja el HUD (y no con F1).
+        game.addListener((CustomizeGuiOverlayEvent.Chat e) -> VoiceHud.render(e.getGuiGraphics()));
         game.addListener((TickEvent.ClientTickEvent e) -> {
             if (e.phase == TickEvent.Phase.END) FerrovozClient.onTick(Minecraft.getInstance());
         });
