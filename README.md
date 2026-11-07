@@ -313,5 +313,5 @@ cd native && cargo test --release
 La API de Java se prueba aparte contra la librería nativa real, sin Minecraft (Java 21 y Rust):
 
 ```bash
-tools/api_test.sh
+bash tools/api_test.sh
 ```

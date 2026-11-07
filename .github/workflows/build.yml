@@ -104,7 +104,7 @@ jobs:
           java-version: 21
       - name: API de Java contra el núcleo
         if: matrix.platform == 'linux-x86_64'
-        run: FERROVOZ_LIB="$PWD/native/out/${{ matrix.server_lib }}" tools/api_test.sh
+        run: FERROVOZ_LIB="$PWD/native/out/${{ matrix.server_lib }}" bash tools/api_test.sh
       - uses: actions/upload-artifact@v4
         with:
           name: native-${{ matrix.platform }}
