@@ -1,15 +1,15 @@
 package dev.ferrovoz.api;
 
 /**
- * Lo que fija un plugin sobre un permiso. Con {@link #INHERIT} manda el sistema de
- * permisos del servidor (LuckPerms, operadores...).
+ * What a plugin sets on a permission. With {@link #INHERIT}, the server's permission
+ * system decides (LuckPerms, operators...).
  */
 public enum PermissionOverride {
     INHERIT,
     ALLOW,
     DENY;
 
-    /** El valor final, dado el del sistema de permisos. */
+    /** The final value, given the one from the permission system. */
     public boolean apply(boolean fromPermissions) {
         return switch (this) {
             case INHERIT -> fromPermissions;

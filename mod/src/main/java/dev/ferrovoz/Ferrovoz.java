@@ -101,7 +101,7 @@ public final class Ferrovoz {
             @Override
             public dev.ferrovoz.api.VoiceWorld world(Object world) {
                 if (!(world instanceof Level level)) {
-                    throw new IllegalArgumentException("se esperaba un ServerLevel: " + world.getClass().getName());
+                    throw new IllegalArgumentException("expected a ServerLevel: " + world.getClass().getName());
                 }
                 return new ApiCore.World(dimensionName(level), dimensionOf(level));
             }

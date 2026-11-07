@@ -1,11 +1,11 @@
 package dev.ferrovoz.api;
 
-/** Permisos de voz que un plugin puede forzar para un jugador. */
+/** Voice permissions a plugin can override for a player. */
 public enum VoicePermission {
-    /** {@code ferrovoz.speak}: que se le oiga. */
+    /** {@code ferrovoz.speak}: can be heard. */
     SPEAK,
-    /** {@code ferrovoz.shout}: gritar (si no, el grito sale como voz normal). */
+    /** {@code ferrovoz.shout}: can shout (otherwise shouting is normal voice). */
     SHOUT,
-    /** {@code ferrovoz.priority}: se le oye siempre, aunque haya multitud o silencio general. */
+    /** {@code ferrovoz.priority}: always heard, even in a crowd or while everyone is hushed. */
     PRIORITY
 }

@@ -1,4 +1,4 @@
 package dev.ferrovoz.api.event;
 
-/** El relé de voz se ha puesto en marcha. */
+/** The voice relay has started. */
 public record VoiceServerStartedEvent() implements VoiceEvent {}

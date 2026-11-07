@@ -1,12 +1,12 @@
 package dev.ferrovoz.api.audio;
 
-/** Codificador Opus. No es seguro usar uno desde varios hilos a la vez. */
+/** Opus encoder. Not safe to use from several threads at once. */
 public interface OpusEncoder extends AutoCloseable {
     /**
-     * @param frame {@link AudioFormat#FRAME_SAMPLES} muestras
-     * @return la trama Opus
-     * @throws IllegalArgumentException si no son 960 muestras
-     * @throws IllegalStateException si ya está cerrado
+     * @param frame {@link AudioFormat#FRAME_SAMPLES} samples
+     * @return the Opus frame
+     * @throws IllegalArgumentException if it isn't 960 samples
+     * @throws IllegalStateException if it's already closed
      */
     byte[] encode(short[] frame);
 

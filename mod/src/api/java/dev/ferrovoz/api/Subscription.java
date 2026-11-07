@@ -1,6 +1,6 @@
 package dev.ferrovoz.api;
 
-/** Una suscripción (a eventos o a la voz). Se puede cancelar varias veces sin problema. */
+/** A subscription (to events or to voice). Cancelling it more than once is fine. */
 public interface Subscription extends AutoCloseable {
     void unsubscribe();
 

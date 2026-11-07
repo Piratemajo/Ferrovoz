@@ -1,29 +1,29 @@
 package dev.ferrovoz.api;
 
 /**
- * Ajustes del relé en marcha. Empiezan con los de {@code ferrovoz.properties}; lo que
- * se cambie aquí dura hasta que se reinicie el servidor.
+ * Settings of the running relay. They start from {@code ferrovoz.properties}; changes
+ * made here last until the server restarts.
  */
 public interface VoiceSettings {
-    /** Alcance de un modo, en bloques. */
+    /** Range of a talk mode, in blocks. */
     double range(TalkMode mode);
 
-    /** Entre 1 y 30000 bloques. */
+    /** Between 1 and 30000 blocks. */
     void setRange(TalkMode mode, double blocks);
 
-    /** Voces por separado como mucho en cada zona; el resto va al murmullo. 0 = sin límite. */
+    /** Most separate voices per zone; the rest goes into the crowd murmur. 0 = no limit. */
     int maxVoices();
 
     void setMaxVoices(int maxVoices);
 
-    /** Eco en cuevas y salas. */
+    /** Echo in caves and rooms. */
     boolean caveEcho();
 
     void setCaveEcho(boolean enabled);
 
     /**
-     * Silencio general: solo se oye a quien tenga {@link VoicePermission#PRIORITY}. Para
-     * discursos y presentaciones. A los demás se les ve con el micro silenciado.
+     * Hush: only players with {@link VoicePermission#PRIORITY} can be heard. For speeches
+     * and shows. Everyone else shows up with a muted microphone.
      */
     boolean isHushed();
 

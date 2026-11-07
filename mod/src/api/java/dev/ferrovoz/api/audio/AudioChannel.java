@@ -6,15 +6,14 @@ import java.util.Collection;
 import java.util.UUID;
 
 /**
- * Un altavoz del servidor. Cada llamada a {@link #send} es una trama de 20 ms: hay que
- * enviarlas a ritmo, 50 por segundo, o usar {@link #play}, que lo hace solo.
+ * A server-side speaker. Each call to {@link #send} is one 20 ms frame: send them in
+ * real time, 50 per second, or use {@link #play}, which paces them for you.
  *
- * <p>Lo reproducen todos los clientes de Ferrovoz, también los anteriores a la API
- * (que lo muestran en la lista de quién habla con un nombre raro). Se cierra solo al
- * parar el relé.
+ * <p>Every Ferrovoz client plays it, including those older than the API (which list it
+ * among the people talking under an odd name). It closes by itself when the relay stops.
  */
 public interface AudioChannel extends AutoCloseable {
-    /** Id con el que lo ven los clientes. Empieza por {@code 66657272-6f76-6f7a} ("ferrovoz"). */
+    /** The id clients see it under. Starts with {@code 66657272-6f76-6f7a} ("ferrovoz"). */
     UUID id();
 
     boolean isOpen();
@@ -27,33 +26,33 @@ public interface AudioChannel extends AutoCloseable {
 
     void sendToGroup(String group);
 
-    /** Alcance cuando tiene posición, de 1 a 30000 bloques. */
+    /** Range when it has a position, from 1 to 30000 blocks. */
     void setRange(double blocks);
 
-    /** Volumen de lo que se manda con {@link #send}, de 0 a 4 (1 = tal cual). */
+    /** Volume of what is sent with {@link #send}, from 0 to 4 (1 = unchanged). */
     void setVolume(float volume);
 
     float volume();
 
     /**
-     * Codifica y envía 20 ms: {@link AudioFormat#FRAME_SAMPLES} muestras.
+     * Encodes and sends 20 ms: {@link AudioFormat#FRAME_SAMPLES} samples.
      *
-     * @return false si el canal está cerrado
-     * @throws IllegalArgumentException si la trama no tiene 960 muestras
+     * @return false if the channel is closed
+     * @throws IllegalArgumentException if the frame doesn't have 960 samples
      */
     boolean send(short[] frame);
 
-    /** Envía una trama Opus ya codificada (20 ms, 48 kHz, mono, hasta 1275 bytes). */
+    /** Sends an already encoded Opus frame (20 ms, 48 kHz, mono, up to 1275 bytes). */
     boolean sendOpus(byte[] frame);
 
     /**
-     * Reproduce una fuente a ritmo, en un hilo de Ferrovoz. Para lo que esté sonando en
-     * este canal. La reproducción acaba cuando la fuente devuelve null, al pararla o al
-     * cerrar el canal.
+     * Plays a source in real time on a Ferrovoz thread, replacing whatever was playing
+     * on this channel. Playback ends when the source returns null, when it is stopped or
+     * when the channel closes.
      */
     Playback play(FrameSource source);
 
-    /** Para la reproducción en curso, si hay. */
+    /** Stops the current playback, if any. */
     void stop();
 
     @Override

@@ -1,8 +1,8 @@
 package dev.ferrovoz.api.event;
 
 /**
- * Orden de los suscriptores. Los de {@link #EARLY} deciden primero; los de
- * {@link #LATE} ven la decisión final (por ejemplo, si un evento quedó cancelado).
+ * Order of subscribers. {@link #EARLY} ones decide first; {@link #LATE} ones see the
+ * final outcome (for example, whether an event ended up cancelled).
  */
 public enum EventPriority {
     EARLY,

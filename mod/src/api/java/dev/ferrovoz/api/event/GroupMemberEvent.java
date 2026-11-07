@@ -2,15 +2,15 @@ package dev.ferrovoz.api.event;
 
 import java.util.UUID;
 
-/** Ha cambiado quién está en un grupo. Ya ha pasado: no se puede cancelar. */
+/** Group membership changed. It has already happened: it can't be cancelled. */
 public record GroupMemberEvent(Type type, String group, UUID player) implements VoiceEvent {
     public enum Type {
         JOINED,
         LEFT,
         KICKED,
-        /** Volvió a entrar al servidor y se le devolvió a su grupo permanente. */
+        /** They came back to the server and were put back in their persistent group. */
         REJOINED,
-        /** {@code player} es el nuevo dueño. */
+        /** {@code player} is the new owner. */
         NEW_OWNER
     }
 }

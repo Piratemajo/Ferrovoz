@@ -102,7 +102,7 @@ public final class FerrovozPlugin extends JavaPlugin implements Listener {
             @Override
             public dev.ferrovoz.api.VoiceWorld world(Object world) {
                 if (!(world instanceof World w)) {
-                    throw new IllegalArgumentException("se esperaba un org.bukkit.World: " + world.getClass().getName());
+                    throw new IllegalArgumentException("expected an org.bukkit.World: " + world.getClass().getName());
                 }
                 return new ApiCore.World(w.getName(), dimensionOf(w));
             }

@@ -9,8 +9,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Dónde Ferrovoz deja su implementación. Interno: los plugins usan
- * {@link FerrovozApi#get()} y compañía, no esta clase.
+ * Where Ferrovoz puts its implementation. Internal: plugins use
+ * {@link FerrovozApi#get()} and friends, not this class.
  */
 public final class ApiAccess {
     private static final Logger LOG = Logger.getLogger("ferrovoz");
@@ -25,7 +25,7 @@ public final class ApiAccess {
 
     public static FerrovozApi require() {
         FerrovozApi api = current();
-        if (api == null) throw new IllegalStateException("Ferrovoz no está cargado (o no tiene librería nativa para esta máquina)");
+        if (api == null) throw new IllegalStateException("Ferrovoz is not loaded (or has no native library for this machine)");
         return api;
     }
 
@@ -41,7 +41,7 @@ public final class ApiAccess {
         action.accept(api);
     }
 
-    /** Lo llama Ferrovoz al cargar. Ejecuta lo que estaba esperando. */
+    /** Called by Ferrovoz when it loads. Runs whatever was waiting. */
     public static void register(FerrovozApi api) {
         List<Consumer<FerrovozApi>> run;
         synchronized (ApiAccess.class) {

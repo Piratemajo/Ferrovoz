@@ -2,7 +2,7 @@ package dev.ferrovoz.api.event;
 
 import java.util.UUID;
 
-/** Un jugador va a crear un grupo con {@code /voz grupo crear}. */
+/** A player is about to create a group with {@code /voice group create}. */
 public final class GroupCreateEvent extends CancellableEvent {
     private final UUID player;
     private final String group;

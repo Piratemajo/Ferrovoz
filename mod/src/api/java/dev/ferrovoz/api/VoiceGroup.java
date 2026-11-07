@@ -5,12 +5,12 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Un grupo de voz: sus miembros se oyen a cualquier distancia y en cualquier mundo.
- * Es una vista por nombre; si el grupo se borra, {@link #exists()} pasa a false y los
- * cambios lanzan {@link VoiceGroupException}.
+ * A voice group: its members hear each other at any distance and in any world. It is a
+ * view by name; once the group is deleted, {@link #exists()} becomes false and changes
+ * throw {@link VoiceGroupException}.
  *
- * <p>Los grupos temporales se borran al quedarse vacíos. Los permanentes se guardan en
- * disco y recuerdan a sus miembros.
+ * <p>Temporary groups are deleted when they become empty. Persistent ones are saved to
+ * disk and remember their members.
  */
 public interface VoiceGroup {
     String name();
@@ -19,7 +19,7 @@ public interface VoiceGroup {
 
     Optional<UUID> owner();
 
-    /** Miembros conectados ahora. */
+    /** Members who are online now. */
     Set<UUID> members();
 
     boolean hasPassword();
@@ -28,12 +28,12 @@ public interface VoiceGroup {
 
     void setPersistent(boolean persistent);
 
-    /** Mete a un jugador sin pedir contraseña. Si estaba en otro grupo, sale de él. */
+    /** Adds a player without asking for the password. If they were in another group, they leave it. */
     void add(UUID player);
 
-    /** Saca a un jugador. false si no estaba. */
+    /** Removes a player. false if they weren't in it. */
     boolean remove(UUID player);
 
-    /** Lo borra aunque sea permanente; sus miembros se quedan sin grupo. */
+    /** Deletes it even if it is persistent; its members are left without a group. */
     void delete();
 }

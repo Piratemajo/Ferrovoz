@@ -3,8 +3,8 @@ package dev.ferrovoz.api.event;
 import java.util.UUID;
 
 /**
- * Un jugador va a entrar en un grupo con {@code /voz grupo unirse}. Se lanza antes de
- * comprobar la contraseña.
+ * A player is about to join a group with {@code /voice group join}. Fired before the
+ * password is checked.
  */
 public final class GroupJoinEvent extends CancellableEvent {
     private final UUID player;

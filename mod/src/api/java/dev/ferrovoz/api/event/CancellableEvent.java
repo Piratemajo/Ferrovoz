@@ -1,6 +1,6 @@
 package dev.ferrovoz.api.event;
 
-/** Base de los eventos que se pueden cancelar. */
+/** Base class for events that can be cancelled. */
 public abstract class CancellableEvent implements Cancellable {
     private volatile boolean cancelled;
 

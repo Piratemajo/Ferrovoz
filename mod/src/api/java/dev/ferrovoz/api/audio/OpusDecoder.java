@@ -1,14 +1,14 @@
 package dev.ferrovoz.api.audio;
 
 /**
- * Decodificador Opus, con estado: uno por cada fuente, y las tramas en orden. No es
- * seguro usar uno desde varios hilos a la vez.
+ * Opus decoder. It keeps state: use one per source and feed frames in order. Not safe
+ * to use from several threads at once.
  */
 public interface OpusDecoder extends AutoCloseable {
     /**
-     * @param frame trama Opus, o null si se perdió (rellena el hueco de forma natural)
-     * @return {@link AudioFormat#FRAME_SAMPLES} muestras
-     * @throws IllegalStateException si ya está cerrado
+     * @param frame an Opus frame, or null if it was lost (the gap is filled in naturally)
+     * @return {@link AudioFormat#FRAME_SAMPLES} samples
+     * @throws IllegalStateException if it's already closed
      */
     short[] decode(byte[] frame);
 

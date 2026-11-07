@@ -10,78 +10,78 @@ import java.util.UUID;
 import java.util.function.Consumer;
 
 /**
- * Entrada a la API de Ferrovoz en el servidor. Es la misma en Fabric, NeoForge, Forge
- * y Paper/Spigot/Folia, y en todas las versiones de Minecraft que soporta Ferrovoz:
- * no usa ninguna clase del juego.
+ * Entry point of the Ferrovoz server API. It is the same on Fabric, NeoForge, Forge and
+ * Paper/Spigot/Folia, and on every Minecraft version Ferrovoz supports: it uses no game
+ * classes.
  *
  * <pre>{@code
  * FerrovozApi.whenReady(api -> {
  *     api.events().subscribe(PlayerStartedSpeakingEvent.class, e ->
- *             log.info(e.player().name() + " habla"));
+ *             log.info(e.player().name() + " is talking"));
  * });
  * }</pre>
  *
- * <p>Todo se puede llamar desde cualquier hilo. Los eventos llegan en el hilo del
- * servidor (en Folia, en el planificador global); la voz que se escucha con
- * {@link AudioService#listen}, en un hilo propio.
+ * <p>Everything can be called from any thread. Events are delivered on the server
+ * thread (on Folia, on the global region scheduler); voice received through
+ * {@link AudioService#listen} arrives on a thread of its own.
  *
- * <p>Con el relé de voz parado ({@link #isRunning()} false) las consultas devuelven
- * vacío, los cambios no hacen nada y crear un canal de audio lanza
+ * <p>While the voice relay is stopped ({@link #isRunning()} is false), queries return
+ * empty results, changes do nothing and creating an audio channel throws
  * {@link IllegalStateException}.
  */
 public interface FerrovozApi {
-    /** Versión de esta API. Sube al cambiar algo de forma incompatible. */
+    /** Version of this API. It goes up when something changes incompatibly. */
     int API_VERSION = 1;
 
-    /** @throws IllegalStateException si Ferrovoz no está cargado todavía. */
+    /** @throws IllegalStateException if Ferrovoz has not loaded yet */
     static FerrovozApi get() {
         return ApiAccess.require();
     }
 
-    /** Vacío si Ferrovoz no está cargado (o no tiene librería nativa para esta máquina). */
+    /** Empty if Ferrovoz is not loaded (or has no native library for this machine). */
     static Optional<FerrovozApi> find() {
         return Optional.ofNullable(ApiAccess.current());
     }
 
     /**
-     * Ejecuta {@code action} en cuanto la API esté disponible: ahora mismo si ya lo
-     * está, o cuando Ferrovoz termine de cargar. No hace falta preocuparse del orden en
-     * que cargan los mods o plugins.
+     * Runs {@code action} as soon as the API is available: right away if it already is,
+     * or when Ferrovoz finishes loading. The load order of mods and plugins does not
+     * matter.
      */
     static void whenReady(Consumer<FerrovozApi> action) {
         ApiAccess.whenReady(action);
     }
 
-    /** Versión de Ferrovoz, p. ej. {@code "0.12.0"}. */
+    /** Ferrovoz version, e.g. {@code "0.12.0"}. */
     String version();
 
-    /** {@code "Fabric"}, {@code "NeoForge"}, {@code "Forge"} o {@code "Paper"}. */
+    /** {@code "Fabric"}, {@code "NeoForge"}, {@code "Forge"}, {@code "Paper"}, {@code "Spigot"} or {@code "Folia"}. */
     String platform();
 
-    /** El relé de voz está en marcha. */
+    /** The voice relay is running. */
     boolean isRunning();
 
-    /** Un jugador con Ferrovoz en este servidor. Vacío si no tiene el mod o no está. */
+    /** A player with Ferrovoz on this server. Empty if they don't have the mod or aren't online. */
     Optional<VoicePlayer> player(UUID id);
 
-    /** Los jugadores con Ferrovoz conectados ahora. */
+    /** Players with Ferrovoz who are online now. */
     Collection<VoicePlayer> players();
 
     VoiceGroups groups();
 
-    /** Alcances, multitudes, eco y silencio general. Los cambios no se guardan en el archivo. */
+    /** Ranges, crowds, echo and hush. Changes are not written to the config file. */
     VoiceSettings settings();
 
-    /** Canales de audio, escucha del micro y códec Opus. */
+    /** Audio channels, microphone listening and the Opus codec. */
     AudioService audio();
 
     EventBus events();
 
     /**
-     * El mundo de Ferrovoz que corresponde a uno del juego: un {@code org.bukkit.World}
-     * en Paper o un {@code ServerLevel} en los mods.
+     * The Ferrovoz world for a game world: an {@code org.bukkit.World} on Paper or a
+     * {@code ServerLevel} on mod loaders.
      *
-     * @throws IllegalArgumentException si no es un mundo de esta plataforma
+     * @throws IllegalArgumentException if it is not a world of this platform
      */
     VoiceWorld world(Object platformWorld);
 }

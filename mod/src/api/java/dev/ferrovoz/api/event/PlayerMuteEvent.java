@@ -3,13 +3,13 @@ package dev.ferrovoz.api.event;
 import java.util.Optional;
 import java.util.UUID;
 
-/** Un moderador va a silenciar (o a quitar el silencio) con {@code /voz silenciar}. */
+/** A moderator is about to mute (or unmute) someone with {@code /voice mute}. */
 public final class PlayerMuteEvent extends CancellableEvent {
     private final UUID target;
     private final boolean mute;
     private final UUID moderator;
 
-    /** {@code moderator} null si es la consola. */
+    /** {@code moderator} is null for the console. */
     public PlayerMuteEvent(UUID target, boolean mute, UUID moderator) {
         this.target = target;
         this.mute = mute;
@@ -20,7 +20,7 @@ public final class PlayerMuteEvent extends CancellableEvent {
         return target;
     }
 
-    /** true al silenciar, false al quitar el silencio. */
+    /** true when muting, false when unmuting. */
     public boolean mute() {
         return mute;
     }

@@ -3,5 +3,5 @@ package dev.ferrovoz.api.event;
 import java.util.Optional;
 import java.util.UUID;
 
-/** Se ha borrado un grupo. {@code by} está vacío si lo borró un plugin o la consola. */
+/** A group was deleted. {@code by} is empty if a plugin or the console deleted it. */
 public record GroupDeletedEvent(String group, Optional<UUID> by) implements VoiceEvent {}

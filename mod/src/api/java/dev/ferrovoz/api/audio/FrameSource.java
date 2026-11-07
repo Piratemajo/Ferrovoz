@@ -4,15 +4,15 @@ import java.util.Arrays;
 import java.util.Objects;
 
 /**
- * Audio para {@link AudioChannel#play}: devuelve una trama de
- * {@link AudioFormat#FRAME_SAMPLES} muestras cada vez, o null al acabar. Se llama en
- * el hilo de reproducción de Ferrovoz, cada 20 ms; tiene que ser rápido.
+ * Audio for {@link AudioChannel#play}: returns a frame of
+ * {@link AudioFormat#FRAME_SAMPLES} samples each time, or null at the end. It is called
+ * on Ferrovoz's playback thread every 20 ms, so it must be fast.
  */
 @FunctionalInterface
 public interface FrameSource {
     short[] next();
 
-    /** Un audio entero (48 kHz, mono) troceado en tramas; la última se rellena con silencio. */
+    /** A whole clip (48 kHz, mono) split into frames; the last one is padded with silence. */
     static FrameSource of(short[] samples) {
         Objects.requireNonNull(samples, "samples");
         return new FrameSource() {
@@ -29,10 +29,10 @@ public interface FrameSource {
         };
     }
 
-    /** El mismo audio en bucle, hasta que se pare la reproducción. */
+    /** The same clip on a loop, until the playback is stopped. */
     static FrameSource loop(short[] samples) {
         Objects.requireNonNull(samples, "samples");
-        if (samples.length == 0) throw new IllegalArgumentException("audio vacío");
+        if (samples.length == 0) throw new IllegalArgumentException("empty clip");
         return new FrameSource() {
             private int pos;
 

@@ -2,11 +2,11 @@ package dev.ferrovoz.api.audio;
 
 import dev.ferrovoz.api.Subscription;
 
-/** Sonido de los plugins, escucha de la voz y códec Opus. */
+/** Sound from plugins, voice listening and the Opus codec. */
 public interface AudioService {
     /**
-     * Empieza a crear un canal de audio: un altavoz que manda el servidor y oyen los
-     * jugadores como si alguien hablase.
+     * Starts building an audio channel: a speaker driven by the server that players hear
+     * as if someone were talking.
      *
      * <pre>{@code
      * AudioChannel radio = api.audio().channel().music().at(position, 32);
@@ -16,18 +16,18 @@ public interface AudioService {
     ChannelBuilder channel();
 
     /**
-     * Recibe la voz de todos los jugadores, trama a trama, en Opus. Solo lo que se
-     * reenvía: lo de un jugador silenciado no llega. El listener se llama en el hilo
-     * {@code ferrovoz-microphone}, unas 50 veces por segundo por cada uno que habla:
-     * hay que devolver rápido y llevar a otro hilo lo que sea lento.
+     * Receives every player's voice, frame by frame, as Opus. Only what is relayed: a
+     * muted player's voice doesn't arrive. The listener runs on the
+     * {@code ferrovoz-microphone} thread, about 50 times per second for each player
+     * talking: return quickly and move anything slow to another thread.
      *
-     * <p>Mientras no haya nadie escuchando, el relé no copia nada.
+     * <p>While nobody is listening, the relay copies nothing.
      */
     Subscription listen(MicrophoneListener listener);
 
-    /** Codificador Opus de 20 ms a 48 kHz mono. {@code music} para música y efectos. */
+    /** Opus encoder for 20 ms at 48 kHz mono. {@code music} for music and sound effects. */
     OpusEncoder createEncoder(int bitrate, boolean music);
 
-    /** Decodificador Opus: uno por cada jugador o fuente que se decodifique. */
+    /** Opus decoder: one for each player or source being decoded. */
     OpusDecoder createDecoder();
 }

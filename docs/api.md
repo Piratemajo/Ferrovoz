@@ -1,19 +1,21 @@
-# API de Ferrovoz para plugins y mods
+# Ferrovoz API for plugins and mods
 
-Con la API, otro plugin o mod del servidor puede:
+*[Español](api-es.md)*
 
-- **Controlar la voz**: silenciar, forzar permisos, dar a alguien un alcance propio (megáfono, escenario), silencio general para un discurso, grupos sin contraseña, alcances y multitudes en marcha.
-- **Enterarse de lo que pasa**: quién conecta, quién empieza y deja de hablar, cambios en los grupos… e impedir que un jugador cree un grupo, entre en uno o silencie a alguien.
-- **Poner sonido**: canales de audio que suenan desde un punto, siguiendo a un jugador, a unos jugadores concretos o a un grupo, con 3D como la voz. WAV, PCM u Opus.
-- **Escuchar la voz**: recibir el audio de cada jugador para grabarlo, transcribirlo o hacer un bot.
+With the API, another plugin or mod on the server can:
 
-Es la misma en **Fabric, NeoForge, Forge y Paper/Spigot/Folia**, y en **26.3 y 1.21.1**: no usa ninguna clase de Minecraft. Solo funciona en el servidor.
+- **Control voice**: mute players, override permissions, give someone their own range (a megaphone, a stage), hush everyone for a speech, manage groups without passwords, and change ranges and crowd limits while the server runs.
+- **Know what's going on**: who connects, who starts and stops talking, group changes… and stop a player from creating a group, joining one or muting someone.
+- **Play sound**: audio channels that play from a point, follow a player, or go to specific players or a group, in 3D like voice. WAV, PCM or Opus.
+- **Listen to voice**: receive each player's audio to record it, transcribe it or build a bot.
 
-Todo lo de esta página está en el paquete `dev.ferrovoz.api` y tiene javadoc.
+It is the same on **Fabric, NeoForge, Forge and Paper/Spigot/Folia**, and on **26.3 and 1.21.1**: it uses no Minecraft classes. It only works on the server.
 
-## Añadirla al proyecto
+Everything on this page is in the `dev.ferrovoz.api` package and has javadoc.
 
-En cada [release](https://github.com/Piratemajo/Ferrovoz/releases) hay un `ferrovoz-api-<versión>.jar` (más `-sources` y `-javadoc`). Es Java 21 y no depende de nada. Cópialo a `libs/` y compila contra él sin meterlo en tu jar: en el servidor ya lo pone Ferrovoz.
+## Adding it to your project
+
+Every [release](https://github.com/Piratemajo/Ferrovoz/releases) has a `ferrovoz-api-<version>.jar` (plus `-sources` and `-javadoc`). It targets Java 21 and depends on nothing. Put it in `libs/` and compile against it without shading it into your jar, because Ferrovoz already provides it on the server.
 
 ```groovy
 dependencies {
@@ -21,175 +23,179 @@ dependencies {
 }
 ```
 
-Y declara que usas Ferrovoz, para que cargue antes:
+Then declare that you use Ferrovoz so it loads first:
 
-| Plataforma | Dónde | Qué poner |
+| Platform | Where | What to add |
 |---|---|---|
-| Paper/Spigot/Folia | `plugin.yml` | `depend: [Ferrovoz]` (o `softdepend` si es opcional) |
-| Fabric | `fabric.mod.json` | `"depends": { "ferrovoz": "*" }` (o `"suggests"`) |
-| NeoForge / Forge | `mods.toml` | una `[[dependencies.tumod]]` con `modId="ferrovoz"` |
+| Paper/Spigot/Folia | `plugin.yml` | `depend: [Ferrovoz]` (or `softdepend` if optional) |
+| Fabric | `fabric.mod.json` | `"depends": { "ferrovoz": "*" }` (or `"suggests"`) |
+| NeoForge / Forge | `mods.toml` | a `[[dependencies.yourmod]]` with `modId="ferrovoz"` |
 
-## Conseguir la API
+## Getting the API
 
 ```java
 FerrovozApi.whenReady(api -> {
-    // aquí ya se puede usar
+    // ready to use here
 });
 ```
 
-`whenReady` se ejecuta ahora mismo si Ferrovoz ya ha cargado, o en cuanto cargue, así que no importa el orden en que arranquen los mods o plugins. También están `FerrovozApi.get()` (lanza una excepción si no está) y `FerrovozApi.find()` (devuelve un `Optional`). En Paper está además en el `ServicesManager`.
+`whenReady` runs right away if Ferrovoz has already loaded, or as soon as it does, so the load order of mods and plugins doesn't matter. There's also `FerrovozApi.get()`, which throws if Ferrovoz isn't there, and `FerrovozApi.find()`, which returns an `Optional`. On Paper it is also registered in the `ServicesManager`.
 
-Si el servidor no tiene librería nativa para su sistema, Ferrovoz no tiene voz y la API no aparece: `find()` sale vacío.
+If the server has no native library for its system, Ferrovoz has no voice and the API isn't registered, so `find()` is empty.
 
-### Cuándo funciona cada cosa
+### When things work
 
-Ferrovoz carga al arrancar el servidor, pero el **relé de voz** (lo que mueve el audio) se pone en marcha cuando el servidor ya ha arrancado y se para al apagarlo. `api.isRunning()` dice si está en marcha, y hay eventos para ambos momentos (`VoiceServerStartedEvent` y `VoiceServerStoppingEvent`).
+Ferrovoz loads when the server starts, but the **voice relay** (what moves the audio) only starts once the server is up, and stops when it shuts down. `api.isRunning()` tells you whether it is running, and there are events for both moments (`VoiceServerStartedEvent` and `VoiceServerStoppingEvent`).
 
-Con el relé parado, las consultas devuelven vacío, los cambios no hacen nada, crear un canal lanza `IllegalStateException` y lo de los grupos, `VoiceGroupException` con motivo `NOT_RUNNING`.
+While the relay is stopped:
 
-### Hilos
+- queries return empty results and changes do nothing;
+- creating a channel throws `IllegalStateException`;
+- group operations throw `VoiceGroupException` with reason `NOT_RUNNING`.
 
-- Se puede llamar a la API **desde cualquier hilo**.
-- Los **eventos** llegan en el hilo del servidor. En Folia, en el planificador global.
-- La **voz que se escucha** llega en un hilo propio (`ferrovoz-microphone`).
-- Las **fuentes de `play`** se leen en otro hilo propio (`ferrovoz-audio`).
+### Threads
 
-## Jugadores
+- You can call the API **from any thread**.
+- **Events** are delivered on the server thread. On Folia, they run on the global region scheduler.
+- **Received voice** arrives on a thread of its own (`ferrovoz-microphone`).
+- **`play` sources** are read on another thread of its own (`ferrovoz-audio`).
+
+## Players
 
 ```java
 api.player(uuid).ifPresent(p -> {
-    p.isConnected();       // ya le llega la voz
-    p.isSpeaking();        // se le oye ahora mismo
-    p.isMicrophoneMuted(); // ha silenciado su micro
+    p.isConnected();       // their voice is flowing
+    p.isSpeaking();        // they can be heard right now
+    p.isMicrophoneMuted(); // they muted their own mic
     p.group();             // Optional<VoiceGroup>
-    p.setMuted(true);      // silencio de moderación: se guarda en disco, como /voz silenciar
+    p.setMuted(true);      // moderator mute: saved to disk, like /voice mute
 });
 ```
 
-`api.player(uuid)` está vacío si el jugador no tiene Ferrovoz. El `VoicePlayer` que devuelve es una vista: cada llamada mira el estado actual.
+`api.player(uuid)` is empty if the player doesn't have Ferrovoz. The `VoicePlayer` it returns is a view: every call reads the current state.
 
-### Permisos y alcance
+### Permissions and range
 
 ```java
 VoicePlayer host = api.player(uuid).orElseThrow();
-host.setPermission(VoicePermission.PRIORITY, PermissionOverride.ALLOW); // se le oye siempre
-host.setRange(300);                                                     // megáfono: 300 bloques
+host.setPermission(VoicePermission.PRIORITY, PermissionOverride.ALLOW); // always heard
+host.setRange(300);                                                     // megaphone: 300 blocks
 // ...
 host.resetRange();
-host.setPermission(VoicePermission.PRIORITY, PermissionOverride.INHERIT); // vuelve a mandar LuckPerms
+host.setPermission(VoicePermission.PRIORITY, PermissionOverride.INHERIT); // LuckPerms decides again
 ```
 
-Lo que fija un plugin manda sobre los permisos del servidor (`ferrovoz.speak`, `ferrovoz.shout`, `ferrovoz.priority`) y se aplica al momento. Dura mientras el servidor esté encendido, también si el jugador sale y vuelve, pero **no se guarda en disco**.
+What a plugin sets takes precedence over the server's permissions (`ferrovoz.speak`, `ferrovoz.shout`, `ferrovoz.priority`) and applies immediately. It lasts while the server is running, including when the player leaves and comes back, but it is **not saved to disk**.
 
-## Ajustes en marcha
+## Runtime settings
 
 ```java
 VoiceSettings s = api.settings();
-s.setHushed(true);                  // silencio general: solo se oye a quien tenga prioridad
+s.setHushed(true);                  // hush: only players with priority can be heard
 s.setRange(TalkMode.SHOUT, 128);
-s.setMaxVoices(16);                 // voces por separado en una multitud
+s.setMaxVoices(16);                 // separate voices in a crowd
 s.setCaveEcho(false);
 ```
 
-Empiezan con los valores de `ferrovoz.properties`, y lo que se cambie aquí dura hasta reiniciar.
+These start from `ferrovoz.properties`, and anything changed here lasts until the server restarts.
 
-## Grupos
+## Groups
 
 ```java
-VoiceGroup team = api.groups().create("Rojos", null, captain); // captain entra y es el dueño
-team.add(otherPlayer);              // sin contraseña; si estaba en otro grupo, sale de él
-team.setPersistent(true);           // se guarda en disco y recuerda a sus miembros
-team.members();                     // los conectados ahora
+VoiceGroup team = api.groups().create("Red", null, captain); // captain joins and owns it
+team.add(otherPlayer);              // no password; if they were in another group, they leave it
+team.setPersistent(true);           // saved to disk, remembers its members
+team.members();                     // the ones online now
 team.delete();
 ```
 
-Los nombres no distinguen mayúsculas, tienen hasta 24 caracteres y no pueden llevar `|`. Si algo falla se lanza `VoiceGroupException`, con `reason()` para saber por qué.
+Names are case-insensitive, up to 24 characters long and can't contain `|`. Failures throw `VoiceGroupException`; `reason()` says why.
 
-## Eventos
+## Events
 
 ```java
 Subscription sub = api.events().subscribe(PlayerStartedSpeakingEvent.class, e ->
-        log.info(e.player().name() + (e.group() ? " habla a su grupo" : " habla (" + e.mode() + ")")));
+        log.info(e.player().name() + (e.group() ? " talks to their group" : " talks (" + e.mode() + ")")));
 // ...
 sub.unsubscribe();
 ```
 
-| Evento | Cuándo |
+| Event | When |
 |---|---|
-| `VoiceServerStartedEvent` / `VoiceServerStoppingEvent` | el relé arranca / se va a parar |
-| `PlayerConnectedEvent` / `PlayerDisconnectedEvent` | a un jugador ya le llega la voz / la ha dejado |
-| `PlayerStartedSpeakingEvent` / `PlayerStoppedSpeakingEvent` | se le empieza a oír / hace unos 400 ms que no |
-| `GroupMemberEvent` | alguien entra, sale, es expulsado, vuelve a su grupo permanente o pasa a ser el dueño |
-| `GroupDeletedEvent` | se borra un grupo |
-| `GroupCreateEvent` ✋ | un jugador va a crear un grupo |
-| `GroupJoinEvent` ✋ | un jugador va a entrar en un grupo (antes de mirar la contraseña) |
-| `PlayerMuteEvent` ✋ | un moderador va a silenciar o quitar el silencio |
+| `VoiceServerStartedEvent` / `VoiceServerStoppingEvent` | the relay starts / is about to stop |
+| `PlayerConnectedEvent` / `PlayerDisconnectedEvent` | a player's voice starts flowing / they left voice chat |
+| `PlayerStartedSpeakingEvent` / `PlayerStoppedSpeakingEvent` | they start being heard / haven't been heard for about 400 ms |
+| `GroupMemberEvent` | someone joins, leaves, gets kicked, is put back in their persistent group or becomes owner |
+| `GroupDeletedEvent` | a group is deleted |
+| `GroupCreateEvent` ✋ | a player is about to create a group |
+| `GroupJoinEvent` ✋ | a player is about to join a group (before the password is checked) |
+| `PlayerMuteEvent` ✋ | a moderator is about to mute or unmute someone |
 
-Los marcados con ✋ se pueden **cancelar**. Solo se lanzan cuando la acción la pide un jugador con `/voz`. Lo que hace un plugin por la API no los lanza, para que dos plugins no se pisen ni entren en bucle. Si cancelas, Ferrovoz no le dice nada al jugador, así que díselo tú:
+Events marked ✋ can be **cancelled**. They are only fired when a player asks with `/voice`. What a plugin does through the API never fires them, so two plugins can't fight or loop. When you cancel one, Ferrovoz tells the player nothing, so tell them yourself:
 
 ```java
 api.events().subscribe(GroupCreateEvent.class, e -> {
     if (!e.group().matches("[A-Za-z0-9 ]+")) {
         e.setCancelled(true);
-        tellPlayer(e.player(), "Solo letras y números en el nombre del grupo.");
+        tellPlayer(e.player(), "Group names can only have letters and numbers.");
     }
 });
 ```
 
-Suscribirse a una clase recibe también sus subclases, así que `VoiceEvent.class` recibe todos. Con `EventPriority` se ordenan los suscriptores: `EARLY` decide primero y `LATE` ve el resultado final. Si un suscriptor lanza una excepción, se apunta en el log y los demás siguen.
+Subscribing to a class also gets its subclasses, so `VoiceEvent.class` receives everything. `EventPriority` orders subscribers: `EARLY` decides first and `LATE` sees the final outcome. If a subscriber throws, the exception is logged and the rest still run.
 
-## Sonido: canales de audio
+## Sound: audio channels
 
-Un canal es un altavoz del servidor. Los clientes lo oyen como a alguien que habla, con el mismo 3D, así que **funciona con cualquier cliente de Ferrovoz**. Los anteriores a la 0.12 lo muestran en la lista de quién habla con un nombre raro; los nuevos no lo muestran.
+A channel is a server-side speaker. Clients hear it the same way they hear someone talking, with the same 3D, so **it works with any Ferrovoz client**. Clients older than 0.12 list it among the people talking under an odd name, and newer ones hide it.
 
 ```java
 AudioService audio = api.audio();
-VoiceWorld world = api.world(bukkitWorld);   // o un ServerLevel en los mods
+VoiceWorld world = api.world(bukkitWorld);   // or a ServerLevel on mod loaders
 
-AudioChannel speaker = audio.channel().music().at(new Position(world, 100, 64, -20), 32); // desde un punto
-AudioChannel radio   = audio.channel().following(playerId, 8);                            // le sigue
-AudioChannel intercom = audio.channel().to(List.of(a, b));                                // solo a ellos, sin 3D
-AudioChannel teamRadio = audio.channel().toGroup("Rojos");                                // a un grupo, sin 3D
+AudioChannel speaker  = audio.channel().music().at(new Position(world, 100, 64, -20), 32); // from a point
+AudioChannel radio    = audio.channel().following(playerId, 8);                            // follows them
+AudioChannel intercom = audio.channel().to(List.of(a, b));                                 // only them, no 3D
+AudioChannel teamRadio = audio.channel().toGroup("Red");                                   // a group, no 3D
 ```
 
-Para reproducir algo entero, `play` lo envía a ritmo él solo:
+To play a whole clip, `play` sends it at the right pace for you:
 
 ```java
 short[] song;
 try (InputStream in = Files.newInputStream(path)) {
-    song = Wav.read(in);                     // cualquier WAV: lo pasa a 48 kHz mono
+    song = Wav.read(in);                     // any WAV: converted to 48 kHz mono
 }
 Playback playback = speaker.play(FrameSource.of(song));
 playback.finished().thenRun(speaker::close);
 ```
 
-Si el audio lo generas tú, envía una trama cada 20 ms con `send(short[960])` (48 kHz, mono, 16 bits), o con `sendOpus(byte[])` si ya lo tienes en Opus.
+If you generate the audio yourself, send one frame every 20 ms with `send(short[960])` (48 kHz, mono, 16-bit), or with `sendOpus(byte[])` if it's already Opus.
 
-- `music()` usa el modo de Opus para música y efectos, y `bitrate(…)` cambia la calidad (por defecto, 48 kbps).
-- `setVolume` va de 0 a 4, y `moveTo`, `follow`, `sendTo` y `setRange` cambian el canal en marcha.
-- Hay hasta 1024 canales abiertos a la vez, y se cierran solos al parar el relé. **Cierra los que ya no uses.**
-- A los canales no se les aplican las paredes del servidor.
+- `music()` uses Opus's mode for music and sound effects, and `bitrate(…)` changes quality (48 kbps by default).
+- `setVolume` goes from 0 to 4, and `moveTo`, `follow`, `sendTo` and `setRange` change a channel while it plays.
+- Up to 1024 channels can be open at once, and they close by themselves when the relay stops. **Close the ones you no longer need.**
+- Server-side wall occlusion is not applied to channels.
 
-## Escuchar la voz
+## Listening to voice
 
 ```java
 Map<UUID, OpusDecoder> decoders = new ConcurrentHashMap<>();
 Subscription listening = api.audio().listen(frame -> {
     OpusDecoder d = decoders.computeIfAbsent(frame.player(), id -> api.audio().createDecoder());
-    short[] pcm = d.decode(frame.opus());    // 960 muestras
-    recorder.write(frame.player(), pcm);     // a otro hilo si es lento
+    short[] pcm = d.decode(frame.opus());    // 960 samples
+    recorder.write(frame.player(), pcm);     // hand it to another thread if it's slow
 });
 ```
 
-Llega cada trama de 20 ms de cada jugador que se oye, en Opus. Lo de un jugador silenciado no llega. `sequence()` sube de uno en uno: si salta, se ha perdido una trama, y `decoder.decode(null)` rellena el hueco.
+You get every 20 ms frame, as Opus, from every player who can be heard. A muted player's voice doesn't arrive. `sequence()` goes up by one each frame: a jump means a lost frame, and `decoder.decode(null)` fills the gap.
 
-El listener se llama unas 50 veces por segundo por cada jugador que habla, en el hilo `ferrovoz-microphone`: devuelve rápido y lleva el trabajo pesado a otro hilo. Mientras no haya nadie escuchando, el relé no copia nada. Cierra los decodificadores cuando un jugador se vaya (`PlayerDisconnectedEvent`).
+The listener runs about 50 times per second for each player talking, on the `ferrovoz-microphone` thread, so return quickly and move heavy work to another thread. While nobody is listening, the relay copies nothing. Close decoders when a player leaves (`PlayerDisconnectedEvent`).
 
-Grabar o analizar la voz de la gente es delicado: **avisa a tus jugadores** si tu plugin lo hace.
+Recording or analysing people's voices is sensitive: **tell your players** if your plugin does it.
 
-## Ejemplo completo: modo escenario
+## Full example: stage mode
 
-Un comando para quien presenta un evento: su voz llega a 200 bloques, siempre se le oye y el público calla hasta que termine. Con la API de Bukkit, pero la parte de Ferrovoz sería igual en un mod.
+This is a command for whoever hosts an event. Their voice reaches 200 blocks, they're always heard, and the audience is hushed until they step down. It uses the Bukkit API, but the Ferrovoz part would be the same in a mod.
 
 ```java
 public final class StageCommand implements CommandExecutor {
@@ -200,12 +206,12 @@ public final class StageCommand implements CommandExecutor {
         if (!(sender instanceof Player player)) return false;
         FerrovozApi api = FerrovozApi.find().orElse(null);
         if (api == null || !api.isRunning()) {
-            player.sendMessage("El chat de voz no está en marcha.");
+            player.sendMessage("Voice chat isn't running.");
             return true;
         }
         VoicePlayer voice = api.player(player.getUniqueId()).orElse(null);
         if (voice == null) {
-            player.sendMessage("Necesitas Ferrovoz para subir al escenario.");
+            player.sendMessage("You need Ferrovoz to go on stage.");
             return true;
         }
         if (player.getUniqueId().equals(onStage)) {
@@ -213,21 +219,21 @@ public final class StageCommand implements CommandExecutor {
             voice.setPermission(VoicePermission.PRIORITY, PermissionOverride.INHERIT);
             api.settings().setHushed(false);
             onStage = null;
-            player.sendMessage("Has bajado del escenario.");
+            player.sendMessage("You left the stage.");
         } else {
             voice.setRange(200);
             voice.setPermission(VoicePermission.PRIORITY, PermissionOverride.ALLOW);
             api.settings().setHushed(true);
             onStage = player.getUniqueId();
-            player.sendMessage("Estás en el escenario: te oyen a 200 bloques y el público está en silencio.");
+            player.sendMessage("You're on stage: heard up to 200 blocks away, and the audience is hushed.");
         }
         return true;
     }
 }
 ```
 
-## Compatibilidad
+## Compatibility
 
-- `FerrovozApi.API_VERSION` sube si algo cambia de forma incompatible. Dentro de una misma versión solo se añaden cosas.
-- Las clases de `dev.ferrovoz.api.internal` son internas: no las uses.
-- Las pruebas de la API están en `tools/api_test.sh`, contra la librería nativa real, y en `native/tests/api.rs`.
+- `FerrovozApi.API_VERSION` goes up if something changes incompatibly. Within one version, things are only added.
+- Classes in `dev.ferrovoz.api.internal` are internal, so don't use them.
+- The API is tested by `tools/api_test.sh`, against the real native library, and by `native/tests/api.rs`.

@@ -5,60 +5,61 @@ import java.util.OptionalDouble;
 import java.util.UUID;
 
 /**
- * Un jugador con Ferrovoz. Es una vista: cada llamada consulta el estado actual, así
- * que se puede guardar mientras el jugador esté conectado.
+ * A player with Ferrovoz. It is a view: every call reads the current state, so it can
+ * be kept around while the player is online.
  *
- * <p>Lo que fija un plugin ({@link #setRange}, {@link #setPermission}) dura mientras el
- * servidor esté encendido, también si el jugador sale y vuelve. No se guarda en disco.
+ * <p>What a plugin sets ({@link #setRange}, {@link #setPermission}) lasts while the
+ * server is running, including if the player leaves and comes back. It is not saved
+ * to disk.
  */
 public interface VoicePlayer {
     UUID id();
 
-    /** Nombre en el juego (o el UUID si ya no está). */
+    /** In-game name (or the UUID once they've left). */
     String name();
 
-    /** Su voz ya va y viene: el cliente ha contactado con el relé. */
+    /** Their voice is flowing: the client has reached the relay. */
     boolean isConnected();
 
-    /** Se le está oyendo ahora mismo. */
+    /** They can be heard right now. */
     boolean isSpeaking();
 
-    /** Ha silenciado su micro (tecla M). */
+    /** They muted their own microphone (M key). */
     boolean isMicrophoneMuted();
 
-    /** Se ha ensordecido (no oye a nadie). */
+    /** They deafened themselves (hear nobody). */
     boolean isDeafened();
 
-    /** Silenciado por moderación. Se guarda en disco, como {@code /voz silenciar}. */
+    /** Muted by a moderator. Saved to disk, like {@code /voice mute}. */
     boolean isMuted();
 
-    /** Silencia o quita el silencio de moderación. No lanza {@code PlayerMuteEvent}. */
+    /** Mutes or unmutes as a moderator. Does not fire {@code PlayerMuteEvent}. */
     void setMuted(boolean muted);
 
-    /** Su grupo, si está en uno. */
+    /** Their group, if they're in one. */
     Optional<VoiceGroup> group();
 
-    /** Pérdida de paquetes de su conexión, en %. 0 si no se sabe. */
+    /** Packet loss on their connection, in percent. 0 if unknown. */
     int packetLoss();
 
     /**
-     * Alcance fijo en bloques en vez del de susurro, normal o grito: un megáfono, un
-     * escenario. Entre 1 y 30000.
+     * A fixed range in blocks instead of the whisper, normal or shout one: a megaphone, a
+     * stage. Between 1 and 30000.
      */
     void setRange(double blocks);
 
-    /** Vuelve al alcance de cada modo. */
+    /** Goes back to the range of each talk mode. */
     void resetRange();
 
-    /** El alcance fijado con {@link #setRange}, si hay uno. */
+    /** The range set with {@link #setRange}, if any. */
     OptionalDouble range();
 
-    /** El valor que ha fijado un plugin (o {@link PermissionOverride#INHERIT}). */
+    /** What a plugin has set (or {@link PermissionOverride#INHERIT}). */
     PermissionOverride permissionOverride(VoicePermission permission);
 
-    /** Fuerza un permiso, o lo devuelve al sistema de permisos con {@code INHERIT}. Se aplica al momento. */
+    /** Forces a permission, or hands it back to the permission system with {@code INHERIT}. Applies immediately. */
     void setPermission(VoicePermission permission, PermissionOverride value);
 
-    /** El permiso que tiene ahora, contando lo que haya forzado un plugin. */
+    /** The permission they have now, including plugin overrides. */
     boolean hasPermission(VoicePermission permission);
 }

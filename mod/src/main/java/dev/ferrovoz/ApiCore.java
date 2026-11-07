@@ -189,13 +189,13 @@ public final class ApiCore implements FerrovozApi {
 
     long requireRunning() {
         long s = server;
-        if (s == 0) throw new IllegalStateException("el relé de voz no está en marcha");
+        if (s == 0) throw new IllegalStateException("the voice relay is not running");
         return s;
     }
 
     int dimensionOf(VoiceWorld world) {
         if (world instanceof World w) return w.dimension();
-        throw new IllegalArgumentException("mundo que no viene de FerrovozApi.world(): " + world);
+        throw new IllegalArgumentException("world not obtained from FerrovozApi.world(): " + world);
     }
 
     static long[] pack(Collection<UUID> ids) {
@@ -352,7 +352,7 @@ public final class ApiCore implements FerrovozApi {
 
         @Override
         public void setRange(double blocks) {
-            if (!(blocks >= 1 && blocks <= MAX_RANGE)) throw new IllegalArgumentException("alcance fuera de 1-30000: " + blocks);
+            if (!(blocks >= 1 && blocks <= MAX_RANGE)) throw new IllegalArgumentException("range must be within 1-30000: " + blocks);
             ranges.put(id, blocks);
             apply(id);
         }
@@ -420,7 +420,7 @@ public final class ApiCore implements FerrovozApi {
 
     private long serverForGroups() {
         long s = server;
-        if (s == 0) throw new VoiceGroupException(VoiceGroupException.Reason.NOT_RUNNING, "el relé de voz no está en marcha");
+        if (s == 0) throw new VoiceGroupException(VoiceGroupException.Reason.NOT_RUNNING, "the voice relay is not running");
         return s;
     }
 
@@ -577,7 +577,7 @@ public final class ApiCore implements FerrovozApi {
         @Override
         public synchronized void setRange(TalkMode mode, double blocks) {
             Objects.requireNonNull(mode, "mode");
-            if (!(blocks >= 1 && blocks <= MAX_RANGE)) throw new IllegalArgumentException("alcance fuera de 1-30000: " + blocks);
+            if (!(blocks >= 1 && blocks <= MAX_RANGE)) throw new IllegalArgumentException("range must be within 1-30000: " + blocks);
             switch (mode) {
                 case WHISPER -> whisper = blocks;
                 case NORMAL -> normal = blocks;
@@ -594,7 +594,7 @@ public final class ApiCore implements FerrovozApi {
 
         @Override
         public void setMaxVoices(int value) {
-            if (value < 0 || value > 256) throw new IllegalArgumentException("max_voices fuera de 0-256: " + value);
+            if (value < 0 || value > 256) throw new IllegalArgumentException("max voices must be within 0-256: " + value);
             maxVoices = value;
             long s = server;
             if (s != 0) FerrovozNative.serverSetMaxVoices(s, value);

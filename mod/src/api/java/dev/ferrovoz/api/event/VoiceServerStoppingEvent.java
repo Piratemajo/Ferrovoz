@@ -1,4 +1,4 @@
 package dev.ferrovoz.api.event;
 
-/** El relé de voz va a pararse. Los canales de audio se cierran justo después. */
+/** The voice relay is about to stop. Audio channels are closed right after. */
 public record VoiceServerStoppingEvent() implements VoiceEvent {}

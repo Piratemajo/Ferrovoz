@@ -1,12 +1,12 @@
 package dev.ferrovoz.api.event;
 
 /**
- * Un evento que se lanza antes de hacer algo y se puede impedir. Solo se lanzan cuando
- * lo pide un jugador (con {@code /voz}); lo que hace un plugin por la API no los lanza,
- * para que dos plugins no se pisen ni entren en bucle.
+ * An event fired before something happens, which can be prevented. These are only
+ * fired when a player asks for it (with {@code /voice}); what a plugin does through
+ * the API never fires them, so two plugins can't fight each other or loop.
  *
- * <p>Si se cancela, Ferrovoz no responde nada al jugador: el plugin que lo cancela le
- * dice por qué.
+ * <p>When cancelled, Ferrovoz tells the player nothing: the plugin that cancels it
+ * should say why.
  */
 public interface Cancellable extends VoiceEvent {
     boolean isCancelled();

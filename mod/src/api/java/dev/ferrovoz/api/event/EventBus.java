@@ -5,9 +5,9 @@ import dev.ferrovoz.api.Subscription;
 import java.util.function.Consumer;
 
 /**
- * Suscripción a los eventos de Ferrovoz. Un suscriptor a un tipo recibe también sus
- * subtipos ({@link VoiceEvent} los recibe todos). Si un suscriptor lanza una
- * excepción se apunta en el log y los demás siguen.
+ * Subscriptions to Ferrovoz events. A subscriber to a type also receives its subtypes
+ * ({@link VoiceEvent} receives everything). If a subscriber throws, the exception is
+ * logged and the rest still run.
  */
 public interface EventBus {
     default <E extends VoiceEvent> Subscription subscribe(Class<E> type, Consumer<? super E> listener) {

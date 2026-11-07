@@ -2,5 +2,5 @@ package dev.ferrovoz.api.event;
 
 import dev.ferrovoz.api.VoicePlayer;
 
-/** A un jugador ya le llega la voz (su cliente ha contactado con el relé). */
+/** A player's voice is now flowing (their client has reached the relay). */
 public record PlayerConnectedEvent(VoicePlayer player) implements VoiceEvent {}

@@ -1,10 +1,10 @@
 package dev.ferrovoz.api;
 
 /**
- * Un mundo (dimensión) para Ferrovoz. Se obtiene con {@link FerrovozApi#world}. Dos
- * objetos del mismo mundo son {@code equals}.
+ * A world (dimension) as Ferrovoz sees it. Get one with {@link FerrovozApi#world}. Two
+ * objects for the same world are {@code equals}.
  */
 public interface VoiceWorld {
-    /** {@code minecraft:overworld} en los mods; el nombre del mundo en Paper. */
+    /** {@code minecraft:overworld} on mod loaders; the world name on Paper. */
     String name();
 }

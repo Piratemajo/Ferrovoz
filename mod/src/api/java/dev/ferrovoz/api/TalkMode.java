@@ -1,12 +1,12 @@
 package dev.ferrovoz.api;
 
-/** Cómo habla un jugador por proximidad. Cada modo tiene su alcance. */
+/** How a player talks by proximity. Each mode has its own range. */
 public enum TalkMode {
     WHISPER,
     NORMAL,
     SHOUT;
 
-    /** Valor del protocolo: 0 normal, 1 susurro, 2 grito. */
+    /** Wire value: 0 normal, 1 whisper, 2 shout. */
     public static TalkMode fromWire(int value) {
         return switch (value) {
             case 1 -> WHISPER;

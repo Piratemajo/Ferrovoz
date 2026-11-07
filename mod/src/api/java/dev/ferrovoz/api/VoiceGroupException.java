@@ -1,22 +1,22 @@
 package dev.ferrovoz.api;
 
-/** No se ha podido hacer algo con un grupo. */
+/** Something could not be done with a group. */
 public final class VoiceGroupException extends RuntimeException {
+    private static final long serialVersionUID = 1L;
+
     public enum Reason {
         INVALID_NAME,
         ALREADY_EXISTS,
         NOT_FOUND,
         WRONG_PASSWORD,
-        /** El jugador no tiene Ferrovoz o no está conectado. */
+        /** The player doesn't have Ferrovoz or isn't online. */
         UNKNOWN_PLAYER,
         NOT_OWNER,
         NOT_IN_GROUP,
-        /** El relé de voz no está en marcha. */
+        /** The voice relay isn't running. */
         NOT_RUNNING,
         UNKNOWN
     }
-
-    private static final long serialVersionUID = 1L;
 
     private final Reason reason;
 
@@ -29,7 +29,7 @@ public final class VoiceGroupException extends RuntimeException {
         return reason;
     }
 
-    /** Código del núcleo (1-7) a su motivo. */
+    /** Core error code (1-7) to its reason. */
     public static Reason reasonOf(int code) {
         return switch (code) {
             case 1 -> Reason.INVALID_NAME;

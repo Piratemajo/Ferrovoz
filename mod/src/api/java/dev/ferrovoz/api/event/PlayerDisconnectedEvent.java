@@ -2,5 +2,5 @@ package dev.ferrovoz.api.event;
 
 import java.util.UUID;
 
-/** Un jugador ha dejado la voz: ha salido del servidor o la ha desactivado. */
+/** A player left voice chat: they left the server or turned voice off. */
 public record PlayerDisconnectedEvent(UUID player) implements VoiceEvent {}

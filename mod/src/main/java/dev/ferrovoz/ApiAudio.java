@@ -84,7 +84,7 @@ final class ApiAudio implements AudioService {
         @Override
         public ChannelBuilder bitrate(int bitsPerSecond) {
             if (bitsPerSecond < 6_000 || bitsPerSecond > 256_000) {
-                throw new IllegalArgumentException("bitrate fuera de 6000-256000: " + bitsPerSecond);
+                throw new IllegalArgumentException("bitrate must be within 6000-256000: " + bitsPerSecond);
             }
             bitrate = bitsPerSecond;
             return this;
@@ -129,7 +129,7 @@ final class ApiAudio implements AudioService {
             long server = core.requireRunning();
             long[] id = FerrovozNative.serverChannelCreate(server, (float) range, bitrate, music);
             if (id == null || id.length != 2) {
-                throw new IllegalStateException("no se pudo crear el canal (¿hay ya 1024 abiertos?)");
+                throw new IllegalStateException("could not create the channel (are 1024 already open?)");
             }
             Channel c = new Channel(server, new UUID(id[0], id[1]));
             channels.add(c);
@@ -138,7 +138,7 @@ final class ApiAudio implements AudioService {
     }
 
     private static void checkRange(double range) {
-        if (!(range >= 1 && range <= MAX_RANGE)) throw new IllegalArgumentException("alcance fuera de 1-30000: " + range);
+        if (!(range >= 1 && range <= MAX_RANGE)) throw new IllegalArgumentException("range must be within 1-30000: " + range);
     }
 
     private final class Channel implements AudioChannel {
@@ -167,7 +167,7 @@ final class ApiAudio implements AudioService {
         }
 
         private void requireOpen() {
-            if (!open) throw new IllegalStateException("canal cerrado");
+            if (!open) throw new IllegalStateException("channel is closed");
         }
 
         @Override
@@ -208,7 +208,7 @@ final class ApiAudio implements AudioService {
 
         @Override
         public void setVolume(float volume) {
-            if (!(volume >= 0 && volume <= 4)) throw new IllegalArgumentException("volumen fuera de 0-4: " + volume);
+            if (!(volume >= 0 && volume <= 4)) throw new IllegalArgumentException("volume must be within 0-4: " + volume);
             this.volume = volume;
         }
 
@@ -220,7 +220,7 @@ final class ApiAudio implements AudioService {
         @Override
         public boolean send(short[] frame) {
             if (frame == null || frame.length != AudioFormat.FRAME_SAMPLES) {
-                throw new IllegalArgumentException("una trama son " + AudioFormat.FRAME_SAMPLES + " muestras");
+                throw new IllegalArgumentException("a frame is " + AudioFormat.FRAME_SAMPLES + " samples");
             }
             return open && FerrovozNative.serverChannelSendPcm(server, msb, lsb, frame, volume);
         }
@@ -406,20 +406,20 @@ final class ApiAudio implements AudioService {
 
     @Override
     public OpusEncoder createEncoder(int bitrate, boolean music) {
-        if (bitrate < 6_000 || bitrate > 256_000) throw new IllegalArgumentException("bitrate fuera de 6000-256000: " + bitrate);
+        if (bitrate < 6_000 || bitrate > 256_000) throw new IllegalArgumentException("bitrate must be within 6000-256000: " + bitrate);
         long h = FerrovozNative.opusEncoderCreate(bitrate, music);
-        if (h == 0) throw new IllegalStateException("Opus no ha podido crear el codificador");
+        if (h == 0) throw new IllegalStateException("Opus could not create the encoder");
         return new OpusEncoder() {
             private long handle = h;
 
             @Override
             public synchronized byte[] encode(short[] frame) {
                 if (frame == null || frame.length != AudioFormat.FRAME_SAMPLES) {
-                    throw new IllegalArgumentException("una trama son " + AudioFormat.FRAME_SAMPLES + " muestras");
+                    throw new IllegalArgumentException("a frame is " + AudioFormat.FRAME_SAMPLES + " samples");
                 }
-                if (handle == 0) throw new IllegalStateException("codificador cerrado");
+                if (handle == 0) throw new IllegalStateException("encoder is closed");
                 byte[] out = FerrovozNative.opusEncode(handle, frame);
-                if (out == null) throw new IllegalStateException("Opus no ha podido codificar la trama");
+                if (out == null) throw new IllegalStateException("Opus could not encode the frame");
                 return out;
             }
 
@@ -434,15 +434,15 @@ final class ApiAudio implements AudioService {
     @Override
     public OpusDecoder createDecoder() {
         long h = FerrovozNative.opusDecoderCreate();
-        if (h == 0) throw new IllegalStateException("Opus no ha podido crear el decodificador");
+        if (h == 0) throw new IllegalStateException("Opus could not create the decoder");
         return new OpusDecoder() {
             private long handle = h;
 
             @Override
             public synchronized short[] decode(byte[] frame) {
-                if (handle == 0) throw new IllegalStateException("decodificador cerrado");
+                if (handle == 0) throw new IllegalStateException("decoder is closed");
                 short[] out = FerrovozNative.opusDecode(handle, frame);
-                if (out == null) throw new IllegalStateException("decodificador cerrado");
+                if (out == null) throw new IllegalStateException("decoder is closed");
                 return out;
             }
 
