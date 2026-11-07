@@ -168,13 +168,13 @@ Si cambias algo de `mod/src` que toca Minecraft (lo que no está en la lista `SH
 
 ## Publicar una versión
 
-Las versiones se publican en la pestaña [Releases](../../releases) de este repo, con el jar universal (5 plataformas), su `.sha256` y las notas de `CHANGELOG.md`.
+Las versiones se publican en la pestaña [Releases](../../releases) de este repo, con un jar por versión de Minecraft (26.3 y 1.21.1, cada uno con las 5 plataformas), el jar de la API para plugins (`ferrovoz-api-X.Y.Z.jar`, con fuentes y javadoc), los `.sha256` y las notas de `CHANGELOG.md`.
 
 1. Sube `mod_version` en `mod/gradle.properties` y `version` en `native/Cargo.toml`.
 2. Añade su sección `## [X.Y.Z]` en `CHANGELOG.md`.
 3. Haz commit y crea la etiqueta: `git tag vX.Y.Z && git push --tags`.
 
-El CI compila todo, comprueba que la etiqueta coincide con `mod_version`, que el jar lleva las 5 plataformas y que hay notas, y publica la release. Si la versión lleva guion (`1.0.0-alpha`) se marca como *prerelease*. Si la release ya existe, no la pisa. No hace falta ningún token: usa el de la propia Action.
+El CI compila todo, comprueba que la etiqueta coincide con `mod_version`, que cada jar lleva las 5 plataformas y la API, y que hay notas, y publica la release. Si la versión lleva guion (`1.0.0-alpha`) se marca como *prerelease*. Si la release ya existe, no la pisa. No hace falta ningún token: usa el de la propia Action.
 
 ## Instalación
 
