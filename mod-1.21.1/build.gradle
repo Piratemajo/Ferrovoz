@@ -48,6 +48,10 @@ base {
 
 def sharedSrc = file('../mod/src')
 
+// La API (dev.ferrovoz.api) se crea aquí porque loom.mods la necesita; se configura
+// más abajo.
+sourceSets.maybeCreate('api')
+
 loom {
     splitEnvironmentSourceSets()
 
@@ -99,11 +103,9 @@ def SHARED_CLIENT = [
 def NOT_SHARED_RESOURCES = ['fabric.mod.json', 'pack.mcmeta']
 
 // La API para otros mods y plugins (../mod/src/api): la misma en todas las versiones.
+sourceSets.api.java.srcDirs = [new File(sharedSrc, 'api/java')]
+sourceSets.api.resources.srcDirs = []
 sourceSets {
-    api {
-        java.srcDirs = [new File(sharedSrc, 'api/java')]
-        resources.srcDirs = []
-    }
     main {
         compileClasspath += sourceSets.api.output
         runtimeClasspath += sourceSets.api.output

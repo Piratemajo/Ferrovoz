@@ -10,6 +10,10 @@ base {
     archivesName = project.archives_base_name
 }
 
+// La API (dev.ferrovoz.api) se crea aquí porque loom.mods la necesita; se configura
+// más abajo.
+sourceSets.maybeCreate('api')
+
 loom {
     // Código de cliente separado: garantiza que el servidor dedicado nunca toque clases de cliente.
     splitEnvironmentSourceSets()
@@ -52,7 +56,6 @@ repositories {
 // que la usen también los proyectos de 1.21.1. Va dentro del jar del mod y además en
 // su propio jar (apiJar) para compilar contra ella.
 sourceSets {
-    api {}
     main {
         compileClasspath += sourceSets.api.output
         runtimeClasspath += sourceSets.api.output
