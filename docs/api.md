@@ -95,6 +95,7 @@ s.setHushed(true);                  // hush: only players with priority can be h
 s.setRange(TalkMode.SHOUT, 128);
 s.setMaxVoices(16);                 // separate voices in a crowd
 s.setCaveEcho(false);
+s.setUnderwaterEffect(false);
 ```
 
 These start from `ferrovoz.properties`, and anything changed here lasts until the server restarts.

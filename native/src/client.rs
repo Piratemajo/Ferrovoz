@@ -275,6 +275,8 @@ pub(crate) struct Shared {
     cave_echo: AtomicBool,
     /// El servidor permite el eco (lo dice en cada Pong).
     server_cave_echo: AtomicBool,
+    /// El servidor permite el efecto bajo el agua (lo dice en cada Pong).
+    server_underwater: AtomicBool,
     underwater_fx: AtomicBool,
     /// El oyente tiene la cabeza bajo el agua.
     listener_underwater: AtomicBool,
@@ -381,6 +383,7 @@ impl VoiceClient {
             denoise: AtomicBool::new(true),
             cave_echo: AtomicBool::new(true),
             server_cave_echo: AtomicBool::new(true),
+            server_underwater: AtomicBool::new(true),
             underwater_fx: AtomicBool::new(true),
             listener_underwater: AtomicBool::new(false),
             vad_threshold: AtomicF32::new(0.02),
@@ -577,6 +580,11 @@ impl VoiceClient {
     /// false si el servidor ha desactivado el eco para todos.
     pub fn cave_echo_allowed(&self) -> bool {
         self.shared.server_cave_echo.load(Ordering::Relaxed)
+    }
+
+    /// false si el servidor ha desactivado el efecto bajo el agua para todos.
+    pub fn underwater_allowed(&self) -> bool {
+        self.shared.server_underwater.load(Ordering::Relaxed)
     }
 
     /// Efecto submarino (por defecto activado).
@@ -884,6 +892,7 @@ impl Shared {
                 // Ajuste de bitrate y FEC según la pérdida.
                 let pong = PongInfo::decode(&body);
                 self.server_cave_echo.store(!pong.no_cave_echo, Ordering::Relaxed);
+                self.server_underwater.store(!pong.no_underwater, Ordering::Relaxed);
                 let loss = pong.loss_percent;
                 self.loss_percent.store(loss as u32, Ordering::Relaxed);
                 self.target_bitrate.store(bitrate_for_loss(loss), Ordering::Relaxed);
@@ -1109,7 +1118,7 @@ impl Shared {
         mixer.speakers.retain(|_, s| now.duration_since(s.last_packet) < SPEAKER_TIMEOUT);
 
         let cave_echo = self.cave_echo_on();
-        let water_fx = self.underwater_fx.load(Ordering::Relaxed);
+        let water_fx = self.underwater_fx.load(Ordering::Relaxed) && self.server_underwater.load(Ordering::Relaxed);
         let me_underwater = water_fx && self.listener_underwater.load(Ordering::Relaxed);
         let (listener_wet, listener_room) = mixer.listener_env;
         let mut room = listener_room;

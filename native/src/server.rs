@@ -330,6 +330,9 @@ struct State {
     /// Eco de cuevas y salas permitido. Si no, la voz se reenvía sin el sitio del
     /// hablante y el Pong avisa a los clientes para que apaguen también el suyo.
     cave_echo: bool,
+    /// Efecto bajo el agua permitido. Si no, la voz se reenvía como si nadie estuviera
+    /// sumergido y el Pong avisa a los clientes, como con el eco.
+    underwater_effect: bool,
     /// Silencio general: solo se oye a quien tenga prioridad.
     hush: bool,
     /// Sonido de los plugins (ver [`crate::channels`]).
@@ -380,6 +383,7 @@ impl VoiceServer {
                 crowd_plans: HashMap::new(),
                 crowd_stash: crowd::Stash::default(),
                 cave_echo: true,
+                underwater_effect: true,
                 hush: false,
                 channels: HashMap::new(),
                 mic_tap: false,
@@ -566,6 +570,12 @@ impl VoiceServer {
 
     /// Eco de cuevas y salas para todos (por defecto, sí). Los clientes se enteran
     /// en el siguiente Pong, como mucho en 2 s.
+    /// Efecto bajo el agua para todos (por defecto, sí). Los clientes se enteran en el
+    /// siguiente Pong.
+    pub fn set_underwater_effect(&self, enabled: bool) {
+        self.state().underwater_effect = enabled;
+    }
+
     pub fn set_cave_echo(&self, enabled: bool) {
         self.state().cave_echo = enabled;
     }
@@ -1545,7 +1555,7 @@ impl Shared {
                 return Err(());
             }
         }
-        let (cave_echo, hush) = (st.cave_echo, st.hush);
+        let (cave_echo, hush, underwater_effect) = (st.cave_echo, st.hush, st.underwater_effect);
         let Some(sender) = st.players.get_mut(&sender_id) else {
             Self::note_bad_packet(st, source);
             return Err(());
@@ -1586,7 +1596,12 @@ impl Shared {
                         }
                     }
                 }
-                let pong = PongInfo { loss_percent: sender.loss.percent, no_cave_echo: !cave_echo }.encode();
+                let pong = PongInfo {
+                    loss_percent: sender.loss.percent,
+                    no_cave_echo: !cave_echo,
+                    no_underwater: !underwater_effect,
+                }
+                .encode();
                 let pkt = sender.seal(PacketType::Pong, &pong);
                 deliver(&self.stats, sender, pkt, out);
                 if first || raw.kind == PacketType::Hello {
@@ -1614,7 +1629,7 @@ impl Shared {
                     return Ok(()); // silenciado: se acepta pero no se reenvía
                 }
                 let (src_pos, src_dim, group, env, underwater, src_role) =
-                    (sender.pos, sender.dimension, sender.group, sender.env, sender.underwater, sender.role);
+                    (sender.pos, sender.dimension, sender.group, sender.env, sender.underwater && underwater_effect, sender.role);
                 let rules = st.role_rules;
                 if !rules.can_be_heard(src_role) {
                     return Ok(()); // p. ej. espectador con "listen"

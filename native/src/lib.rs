@@ -479,6 +479,11 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientIsConnected(_: JNI
 }
 
 #[no_mangle]
+pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientUnderwaterAllowed(_: JNIEnv, _: JClass, h: jlong) -> jboolean {
+    guard(1, || borrow::<VoiceClient>(h).map_or(1, |c| c.underwater_allowed() as jboolean))
+}
+
+#[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientCaveEchoAllowed(_: JNIEnv, _: JClass, h: jlong) -> jboolean {
     guard(1, || borrow::<VoiceClient>(h).map_or(1, |c| c.cave_echo_allowed() as jboolean))
 }
@@ -786,6 +791,15 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverSetPriority(
 }
 
 /// Voces por separado como mucho en cada zona; las demás van al murmullo (0 = sin límite).
+#[no_mangle]
+pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverSetUnderwaterEffect(_: JNIEnv, _: JClass, h: jlong, enabled: jboolean) {
+    guard((), || {
+        if let Some(s) = server(h) {
+            s.set_underwater_effect(enabled != 0);
+        }
+    })
+}
+
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverSetCaveEcho(_: JNIEnv, _: JClass, h: jlong, enabled: jboolean) {
     guard((), || {

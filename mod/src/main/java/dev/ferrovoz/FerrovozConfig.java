@@ -50,6 +50,11 @@ public final class FerrovozConfig {
      * activado en sus ajustes.
      */
     public boolean caveEcho = true;
+    /**
+     * Efecto bajo el agua (voz tapada si alguien está sumergido). Con {@code false} no lo
+     * oye nadie, aunque lo tenga activado.
+     */
+    public boolean underwaterEffect = true;
 
     public static final int RULE_NORMAL = 0, RULE_LISTEN = 1, RULE_GHOST = 2, RULE_OWN = 3, RULE_OFF = 4;
     private static final String[] RULE_NAMES = {"normal", "listen", "ghost", "own", "off"};
@@ -78,6 +83,9 @@ public final class FerrovozConfig {
             Boolean caveEcho = parseBool(p, "cave_echo", c.caveEcho);
             ok &= caveEcho != null;
             if (caveEcho != null) c.caveEcho = caveEcho;
+            Boolean underwater = parseBool(p, "underwater_effect", c.underwaterEffect);
+            ok &= underwater != null;
+            if (underwater != null) c.underwaterEffect = underwater;
             if (port != null) c.port = port;
             if (max != null) c.maxDistance = max;
             if (whisper != null) c.whisperDistance = whisper;
@@ -182,6 +190,7 @@ public final class FerrovozConfig {
         p.setProperty("transport", transportName());
         p.setProperty("max_voices", String.valueOf(maxVoices));
         p.setProperty("cave_echo", String.valueOf(caveEcho));
+        p.setProperty("underwater_effect", String.valueOf(underwaterEffect));
         p.setProperty("spectators", ruleName(spectators));
         p.setProperty("dead", ruleName(dead));
         try {
@@ -193,7 +202,9 @@ public final class FerrovozConfig {
                         + " max_voices = voices heard separately per area in a crowd; the rest is mixed into"
                         + " a background murmur (0 = no limit)\n"
                         + " cave_echo = echo in caves and rooms for everyone (false turns it off even if"
-                        + " players have it on)");
+                        + " players have it on)\n"
+                        + " underwater_effect = muffled voice underwater for everyone (false turns it off even"
+                        + " if players have it on)");
             }
         } catch (IOException e) {
             FerrovozLog.LOG.warn("Could not save ferrovoz.properties", e);

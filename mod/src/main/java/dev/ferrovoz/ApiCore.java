@@ -556,6 +556,7 @@ public final class ApiCore implements FerrovozApi {
         private volatile double normal = 48, whisper = 8, shout = 96;
         private volatile int maxVoices = 24;
         private volatile boolean caveEcho = true;
+        private volatile boolean underwaterEffect = true;
 
         void load(FerrovozConfig c) {
             normal = c.maxDistance;
@@ -563,6 +564,7 @@ public final class ApiCore implements FerrovozApi {
             shout = c.shoutDistance;
             maxVoices = c.maxVoices;
             caveEcho = c.caveEcho;
+            underwaterEffect = c.underwaterEffect;
         }
 
         @Override
@@ -610,6 +612,18 @@ public final class ApiCore implements FerrovozApi {
             caveEcho = enabled;
             long s = server;
             if (s != 0) FerrovozNative.serverSetCaveEcho(s, enabled);
+        }
+
+        @Override
+        public boolean underwaterEffect() {
+            return underwaterEffect;
+        }
+
+        @Override
+        public void setUnderwaterEffect(boolean enabled) {
+            underwaterEffect = enabled;
+            long s = server;
+            if (s != 0) FerrovozNative.serverSetUnderwaterEffect(s, enabled);
         }
 
         @Override

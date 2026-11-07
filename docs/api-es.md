@@ -91,6 +91,7 @@ s.setHushed(true);                  // silencio general: solo se oye a quien ten
 s.setRange(TalkMode.SHOUT, 128);
 s.setMaxVoices(16);                 // voces por separado en una multitud
 s.setCaveEcho(false);
+s.setUnderwaterEffect(false);
 ```
 
 Empiezan con los valores de `ferrovoz.properties`, y lo que se cambie aquí dura hasta reiniciar.

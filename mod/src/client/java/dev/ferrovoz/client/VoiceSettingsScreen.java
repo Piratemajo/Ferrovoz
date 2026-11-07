@@ -129,7 +129,8 @@ public final class VoiceSettingsScreen extends Screen {
                     config.caveEcho = !config.caveEcho;
                     FerrovozNative.clientSetCaveEcho(h(), config.caveEcho);
                 }));
-        toggles.add(cycle(0, 0, half, () -> Component.translatable("ferrovoz.settings.underwater", onOff(config.underwaterEffect)),
+        toggles.add(cycle(0, 0, half, () -> Component.translatable("ferrovoz.settings.underwater",
+                        FerrovozNative.clientUnderwaterAllowed(h()) ? onOff(config.underwaterEffect) : Component.translatable("ferrovoz.settings.off_by_server")),
                 b -> {
                     config.underwaterEffect = !config.underwaterEffect;
                     FerrovozNative.clientSetUnderwaterEffect(h(), config.underwaterEffect);

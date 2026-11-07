@@ -352,6 +352,9 @@ public final class ApiSelfTest {
         core.settings().setHushed(true);
         check(core.settings().isHushed(), "silencio general");
         core.settings().setHushed(false);
+        core.settings().setUnderwaterEffect(false);
+        check(!core.settings().underwaterEffect(), "efecto bajo el agua desactivado");
+        core.settings().setUnderwaterEffect(true);
         core.settings().setRange(TalkMode.SHOUT, 200);
         check(core.settings().range(TalkMode.SHOUT) == 200 && core.settings().range(TalkMode.NORMAL) == config.maxDistance, "alcances");
 

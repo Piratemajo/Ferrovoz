@@ -136,6 +136,7 @@ public final class Ferrovoz {
         FerrovozNative.serverSetRoleRules(server, config.spectators, config.dead);
         FerrovozNative.serverSetMaxVoices(server, config.maxVoices);
         FerrovozNative.serverSetCaveEcho(server, config.caveEcho);
+        FerrovozNative.serverSetUnderwaterEffect(server, config.underwaterEffect);
         walls = new WallScheduler();
         // Silencios y grupos permanentes.
         FerrovozNative.serverSetDataFile(server, dataFile.toAbsolutePath().toString());

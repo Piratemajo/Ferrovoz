@@ -121,6 +121,7 @@ public final class FerrovozPlugin extends JavaPlugin implements Listener {
         FerrovozNative.serverSetRoleRules(server, config.spectators, config.dead);
         FerrovozNative.serverSetMaxVoices(server, config.maxVoices);
         FerrovozNative.serverSetCaveEcho(server, config.caveEcho);
+        FerrovozNative.serverSetUnderwaterEffect(server, config.underwaterEffect);
         // Silencios y grupos permanentes.
         FerrovozNative.serverSetDataFile(server, getDataFolder().toPath().resolve("data.txt").toAbsolutePath().toString());
 

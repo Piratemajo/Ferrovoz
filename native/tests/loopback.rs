@@ -707,6 +707,20 @@ fn speaker_underwater_sounds_like_water_unless_the_listener_turns_it_off() {
 }
 
 #[test]
+fn the_server_can_turn_the_underwater_effect_off_for_everyone() {
+    let dry = treble_heard(|_| {});
+    // Los dos bajo el agua y con el efecto activado en sus ajustes, pero el servidor lo quita.
+    let off = treble_heard(|s| {
+        s.server.set_underwater_effect(false);
+        s.server.update_player_full(&s.ids[0], [0.0, 64.0, 0.0], OVERWORLD, true);
+        s.clients[1].set_underwater(true);
+        wait_until("el oyente sabe que no hay efecto", || !s.clients[1].underwater_allowed());
+    });
+    println!("agudos: normal {dry:.2}, bajo el agua sin efecto del servidor {off:.2}");
+    assert!(off > dry * 0.5, "se oye normal aunque los dos estén bajo el agua");
+}
+
+#[test]
 fn cave_echo_can_be_turned_off() {
     let tail = |echo: bool| {
         let s = Scene::new(&[(0.0, 1), (3.0, 1)]);

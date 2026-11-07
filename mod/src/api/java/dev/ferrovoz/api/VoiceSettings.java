@@ -21,6 +21,11 @@ public interface VoiceSettings {
 
     void setCaveEcho(boolean enabled);
 
+    /** Muffled voice when the speaker or the listener is underwater. */
+    boolean underwaterEffect();
+
+    void setUnderwaterEffect(boolean enabled);
+
     /**
      * Hush: only players with {@link VoicePermission#PRIORITY} can be heard. For speeches
      * and shows. Everyone else shows up with a muted microphone.

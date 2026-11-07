@@ -69,7 +69,7 @@ It runs as a mod on **Fabric, NeoForge and Forge**, as a plugin on **Paper, Purp
 - **Opus** codec with automatic quality: 32 kbps on a good connection, down to 14 kbps with extra protection when packets are being lost.
 - **Measured on a real Fabric server** with 100 players in the same spot and 20 talking at once: Ferrovoz added **0.57 ms per tick on average** (about 1% of the tick budget), the server stayed at **20 TPS**, and **99.9%** of voice packets were delivered.
 - **Ready for big events**: when more than 24 voices reach an area at once (`max_voices`), each player hears the closest ones separately and the rest as the **murmur of the crowd**, mixed on the server. Nobody disappears and the server keeps up: in a test with 250 people together and 150 talking, only 31% of the voice got through without it; with it, all of it. Whoever hosts the event (`ferrovoz.priority`) is always heard.
-- **Optional echo**: each player can turn it off in their settings, and the server can turn it off for everyone with `cave_echo=false`.
+- **Optional echo and underwater effect**: each player can turn them off in their settings, and the server can turn them off for everyone with `cave_echo=false` and `underwater_effect=false`.
 
 ---
 

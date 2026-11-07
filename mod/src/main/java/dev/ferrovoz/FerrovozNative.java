@@ -264,6 +264,9 @@ public final class FerrovozNative {
 
     /** Eco de cuevas y salas para todos; los clientes se enteran en 2 s como mucho. */
     public static native void serverSetCaveEcho(long handle, boolean enabled);
+
+    /** Efecto bajo el agua para todos; los clientes se enteran en 2 s como mucho. */
+    public static native void serverSetUnderwaterEffect(long handle, boolean enabled);
     /** Varias oclusiones de golpe: {@code pairs} = [hablante msb, lsb, oyente msb, lsb, ...], {@code amounts} una por pareja. */
     public static native void serverSetOcclusions(long handle, long[] pairs, float[] amounts);
     public static native boolean serverIsMuted(long handle, long uuidMsb, long uuidLsb);
@@ -308,6 +311,9 @@ public final class FerrovozNative {
 
     /** false si el servidor ha desactivado el eco para todos. */
     public static native boolean clientCaveEchoAllowed(long handle);
+
+    /** false si el servidor ha desactivado el efecto bajo el agua para todos. */
+    public static native boolean clientUnderwaterAllowed(long handle);
     /** Efecto submarino. */
     public static native void clientSetUnderwaterEffect(long handle, boolean enabled);
 
