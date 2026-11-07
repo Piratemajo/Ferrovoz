@@ -37,6 +37,7 @@ Java solo hace de pegamento con el juego; captura, códec, red, cifrado, mezcla 
 - **Idiomas**: español, inglés, **portugués, francés y alemán**, en el juego (ajustes, HUD, avisos) y en los mensajes del servidor y del proxy, según el idioma de Minecraft de cada jugador (cualquier variante: `pt_br`, `fr_ca`, `de_at`…). El resto, en inglés. Comandos: `/voz grupo crear` (subcomandos en español) y `/voice group create` (en inglés, el que usan los demás idiomas). Para añadir otro idioma basta con un `messages_<idioma>.properties` y un `<idioma>.json`.
 
 **Para administrar**
+- **API para plugins y mods** (`dev.ferrovoz.api`), la misma en Fabric, NeoForge, Forge y Paper, en 26.3 y 1.21.1. Sirve para controlar la voz (silenciar, permisos, megáfono, silencio general, grupos, ajustes en marcha), recibir eventos (quién conecta, habla, calla o cambia de grupo, y cancelar crear grupos, unirse o silenciar), poner sonido con canales de audio (desde un punto, siguiendo a alguien, a unos jugadores o a un grupo, con 3D; WAV, PCM u Opus) y escuchar la voz para grabarla o hacer bots. Ver [docs/api.md](docs/api.md).
 - **Moderación**: `/voz silenciar <jugador>`, `/voz desilenciar <jugador>` y `/voz estado`. Los silencios se **guardan en disco**: siguen aunque el jugador salga o el servidor se reinicie.
 - **Espectadores y muertos**: cada servidor elige qué oyen y a quién se oye (`spectators` y `dead` en `ferrovoz.properties`):
 
@@ -98,6 +99,8 @@ Java solo hace de pegamento con el juego; captura, códec, red, cifrado, mezcla 
 | `native/tests/load.rs` | Prueba de carga del relé con 50-100 clientes falsos |
 | `native/examples/bench_clients.rs` + `mod/.../Bench.java` | Benchmark en un servidor de Fabric real |
 | `tools/third_party_licenses.py` | Genera el archivo de licencias de terceros |
+| `mod/src/api` | API para plugins y mods (`dev.ferrovoz.api`, Java 21, sin Minecraft); su implementación es `ApiCore` en `mod/src/main` |
+| `tools/api_test.sh` | Prueba la API de Java contra la librería nativa real |
 | `mod/src/main` | Lado servidor común a Fabric, NeoForge y Forge (`Ferrovoz`, `/voz`, `Messages`, `TunnelPump`, `WallTracer`, protocolo y versión, configuración) |
 | `mod/src/main/resources/ferrovoz/lang` | Mensajes del servidor por idioma |
 | `mod/src/client` | Cliente común a Fabric, NeoForge y Forge: teclas, HUD, pantallas, iconos, sensor del mundo |
@@ -113,11 +116,11 @@ Java solo hace de pegamento con el juego; captura, códec, red, cifrado, mezcla 
 Necesitas **Rust** (stable), **JDK 25** y, en Linux, `libasound2-dev` y `cmake`.
 
 ```bash
-cd native && cargo test          # 142 tests: unitarios + extremo a extremo por red (incluidos ataques)
+cd native && cargo test          # 154 tests: unitarios + extremo a extremo por red (incluidos ataques)
 cd ../mod && ./gradlew build     # compila Rust (con y sin audio) y lo mete en el .jar
 ```
 
-En Windows, `gradlew.bat build`. El jar sale en `mod/build/libs/ferrovoz-<Minecraft>-<versión>.jar`.
+En Windows, `gradlew.bat build`. El jar sale en `mod/build/libs/ferrovoz-<Minecraft>-<versión>.jar`, y la API para otros plugins en `ferrovoz-api-<versión>.jar` (con `-sources` y `-javadoc`).
 
 **Lo normal es dejar que lo compile GitHub:** el repo es público, así que Actions es gratis en todos los sistemas. Cada push a `main` (y cada pull request) pasa los tests en las 5 plataformas y deja los **jars** (el de 26.3 y el de 1.21.1) en la página de la ejecución (Actions → la ejecución → *Artifacts* → `ferrovoz-mod`). Los cambios que solo tocan `.md` o `docs/` no lo lanzan.
 
@@ -305,4 +308,10 @@ Ferrovoz es MIT. El jar incluye `META-INF/THIRD_PARTY_LICENSES.txt` con las lice
 cd native && cargo test --release
 ```
 
-142 tests: unitarios (audio, cifrado, jitter buffer, HRTF, reverb, AEC/AGC, mezcla de multitudes...) y de extremo a extremo con un relé real por UDP en localhost: alcances, grupos, permisos, túnel, pérdida de paquetes, ataques de replay y flood, reglas de espectadores, repeticiones, multitudes y anfitrión, y voz a través del proxy. La prueba de carga está en [Rendimiento](#rendimiento).
+154 tests: unitarios (audio, cifrado, jitter buffer, HRTF, reverb, AEC/AGC, mezcla de multitudes...) y de extremo a extremo con un relé real por UDP en localhost: alcances, grupos, permisos, túnel, pérdida de paquetes, ataques de replay y flood, reglas de espectadores, repeticiones, multitudes y anfitrión, voz a través del proxy y lo que usa la API (canales de audio, megáfono, silencio general, escucha del micro, eventos). La prueba de carga está en [Rendimiento](#rendimiento).
+
+La API de Java se prueba aparte contra la librería nativa real, sin Minecraft (Java 21 y Rust):
+
+```bash
+tools/api_test.sh
+```

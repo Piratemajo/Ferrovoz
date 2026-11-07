@@ -60,6 +60,7 @@ It runs as a mod on **Fabric, NeoForge and Forge**, as a plugin on **Paper, Purp
 - **Proxy support**: on Velocity or BungeeCord, a single public UDP port on the proxy forwards voice to every backend server. Switching servers just works.
 - **Network groups**: with `/voicenet create <name>`, members hear each other even when they're on different servers of the network.
 - **Five languages**: English, Spanish, Portuguese, French and German, following each player's game language (and easy to add more).
+- **API for plugins and mods**, the same on every platform and Minecraft version: control voice (mute, permissions, megaphone range, hush everyone but the host, groups), listen to events, play sound in the world (speakers, radios, music, from WAV, PCM or Opus) and receive players' voice to record it or build bots. Docs and the API jar are on GitHub.
 - **Clear warnings**: players are told if their Ferrovoz version doesn't match the server's, if voice isn't available on their system, or if their microphone is blocked (e.g. missing macOS permission).
 
 ### Fast and secure

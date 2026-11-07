@@ -18,6 +18,7 @@ use crate::protocol::{
     self, AudioDown, AudioUp, Environment, GroupState, PacketType, PeerStates, PlayerId, PlayerKey, PongInfo, ReplayWindow,
     TalkMode, CROWD_ID, MAX_PACKET, OCCLUSION_UNKNOWN,
 };
+use crate::channels::{self, Channel, Target};
 use crate::crowd::{self, Cell};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io;
@@ -51,8 +52,14 @@ const FRAME: Duration = Duration::from_millis(20);
 /// Distancia a la que se coloca el murmullo para el cliente: dentro de su zona de
 /// volumen completo, porque la mezcla ya lleva la atenuación de cada voz.
 const CROWD_REL_DISTANCE: f64 = 3.0;
-/// Máximo de eventos de grupo en cola.
-const EVENTS_MAX: usize = 256;
+/// Máximo de eventos en cola. Java los recoge cada tick; con 250 personas hablando
+/// salen unos pocos por tick.
+const EVENTS_MAX: usize = 4096;
+
+/// Tramas del micro en cola para la API (unos 300 ms con 250 personas hablando).
+const MIC_QUEUE_MAX: usize = 4096;
+/// Alcance propio de un jugador como mucho (megáfono, escenario).
+const MAX_RANGE_OVERRIDE: f32 = channels::MAX_RANGE;
 
 // Límites de tráfico. Un hablante envía 50 tramas/s.
 /// Intervalo de envío de los estados de voz.
@@ -104,26 +111,37 @@ impl GroupError {
     }
 }
 
-/// Evento de grupo para avisar a los miembros.
+/// Algo que ha pasado en el relé y Java tiene que saber: avisos de grupo por chat y
+/// eventos de la API.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GroupEvent {
-    pub kind: GroupEventKind,
-    pub group: String,
+pub struct ServerEvent {
+    pub kind: EventKind,
     pub player: PlayerId,
+    /// Grupo, o el modo al empezar a hablar (`normal`, `whisper`, `shout`, `group`).
+    pub detail: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GroupEventKind {
+pub enum EventKind {
     Joined,
     Left,
     Kicked,
     /// Ha vuelto a entrar y se le ha devuelto a su grupo permanente.
     Rejoined,
     NewOwner,
+    /// `player` es quien lo borró, o todo ceros si fue un plugin.
     Deleted,
+    /// Primer Hello: ya le llega la voz.
+    Connected,
+    /// Ha dejado la voz (Bye o salió del servidor).
+    Disconnected,
+    /// Empieza a sonar su voz.
+    StartedSpeaking,
+    /// Lleva [`ACTIVE_SPEAKER`] sin sonar.
+    StoppedSpeaking,
 }
 
-impl GroupEventKind {
+impl EventKind {
     pub fn name(self) -> &'static str {
         match self {
             Self::Joined => "join",
@@ -132,8 +150,23 @@ impl GroupEventKind {
             Self::Rejoined => "rejoin",
             Self::NewOwner => "owner",
             Self::Deleted => "delete",
+            Self::Connected => "connect",
+            Self::Disconnected => "disconnect",
+            Self::StartedSpeaking => "speak",
+            Self::StoppedSpeaking => "silent",
         }
     }
+}
+
+/// Trama del micro de un jugador, para los plugins que escuchan la voz (API).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MicFrame {
+    pub player: PlayerId,
+    pub seq: u32,
+    pub talk: TalkMode,
+    /// Habla a su grupo, no por proximidad.
+    pub group: bool,
+    pub opus: Vec<u8>,
 }
 
 /// Token bucket: `rate` por segundo, máximo `burst`.
@@ -238,6 +271,10 @@ struct Player {
     talk_range: f32,
     /// Se le oye siempre por separado, aunque haya multitud (`ferrovoz.priority`).
     priority: bool,
+    /// Alcance fijado por un plugin en vez del de susurro, normal o grito.
+    range_override: Option<f32>,
+    /// Se le está oyendo (para los eventos de empezar y dejar de hablar).
+    speaking: bool,
 }
 
 impl Player {
@@ -278,7 +315,7 @@ struct State {
     admin_muted: HashSet<PlayerId>,
     ranges: Ranges,
     data_file: Option<PathBuf>,
-    events: VecDeque<GroupEvent>,
+    events: VecDeque<ServerEvent>,
     /// Oclusión (hablante, oyente) calculada por Java en el servidor.
     occlusion: HashMap<(PlayerId, PlayerId), (u8, Instant)>,
     bad_ips: HashMap<IpAddr, TokenBucket>,
@@ -293,6 +330,13 @@ struct State {
     /// Eco de cuevas y salas permitido. Si no, la voz se reenvía sin el sitio del
     /// hablante y el Pong avisa a los clientes para que apaguen también el suyo.
     cave_echo: bool,
+    /// Silencio general: solo se oye a quien tenga prioridad.
+    hush: bool,
+    /// Sonido de los plugins (ver [`crate::channels`]).
+    channels: HashMap<PlayerId, Channel>,
+    /// Algún plugin escucha la voz: las tramas se copian a `mic_frames`.
+    mic_tap: bool,
+    mic_frames: VecDeque<MicFrame>,
 }
 
 struct Shared {
@@ -336,6 +380,10 @@ impl VoiceServer {
                 crowd_plans: HashMap::new(),
                 crowd_stash: crowd::Stash::default(),
                 cave_echo: true,
+                hush: false,
+                channels: HashMap::new(),
+                mic_tap: false,
+                mic_frames: VecDeque::new(),
             }),
             running: AtomicBool::new(true),
             stats: ServerStats::default(),
@@ -392,6 +440,7 @@ impl VoiceServer {
         let key = protocol::random_key();
         self.with_state(|st, out| {
             if let Some(old) = st.players.remove(&id) {
+                st.note_gone(&id, &old);
                 if let Some(g) = old.group {
                     st.cleanup_group(g);
                 }
@@ -418,6 +467,8 @@ impl VoiceServer {
                     last_audio: None,
                     talk_range: 0.0,
                     priority: false,
+                    range_override: None,
+                    speaking: false,
                 },
             );
             // Si era miembro de un grupo permanente, vuelve a él.
@@ -425,7 +476,7 @@ impl VoiceServer {
             if let Some(gid) = saved {
                 st.set_group(&id, Some(gid), out);
                 let name = st.groups[&gid].name.clone();
-                st.push_event(GroupEventKind::Rejoined, name, id);
+                st.push_event(EventKind::Rejoined, name, id);
             }
         });
         key
@@ -434,9 +485,10 @@ impl VoiceServer {
     pub fn remove_player(&self, id: &PlayerId) {
         self.with_state(|st, out| {
             if let Some(p) = st.players.remove(id) {
+                st.note_gone(id, &p);
                 if let Some(g) = p.group {
                     let name = st.groups.get(&g).map(|g| g.name.clone()).unwrap_or_default();
-                    st.push_event(GroupEventKind::Left, name, *id);
+                    st.push_event(EventKind::Left, name, *id);
                     st.after_member_left(g, id, out);
                 }
             }
@@ -518,6 +570,121 @@ impl VoiceServer {
         self.state().cave_echo = enabled;
     }
 
+    /// Alcance propio para un jugador (megáfono, escenario...) en vez del de su modo;
+    /// `None` lo quita. Se pierde al volver a registrarle.
+    pub fn set_range_override(&self, id: &PlayerId, range: Option<f32>) {
+        if let Some(p) = self.state().players.get_mut(id) {
+            p.range_override = range.map(|r| if r.is_finite() { r.clamp(1.0, MAX_RANGE_OVERRIDE) } else { MAX_RANGE_OVERRIDE });
+        }
+    }
+
+    /// Silencio general: no se oye a nadie salvo a quien tiene prioridad. Los demás
+    /// salen con el micro silenciado en los iconos.
+    pub fn set_hush(&self, hush: bool) {
+        self.state().hush = hush;
+    }
+
+    pub fn is_hushed(&self) -> bool {
+        self.state().hush
+    }
+
+    /// Se le está oyendo ahora.
+    pub fn is_speaking(&self, id: &PlayerId) -> bool {
+        self.state().players.get(id).is_some_and(|p| p.speaking)
+    }
+
+    /// Ya le llega la voz (ha hecho el Hello y no se ha ido).
+    pub fn is_connected(&self, id: &PlayerId) -> bool {
+        self.state().players.get(id).is_some_and(|p| !matches!(p.transport, Transport::Pending))
+    }
+
+    /// Flags que manda su cliente: micro silenciado (1) y ensordecido (2).
+    pub fn self_flags(&self, id: &PlayerId) -> Option<u8> {
+        self.state().players.get(id).map(|p| p.self_flags)
+    }
+
+    /// Los jugadores registrados.
+    pub fn player_ids(&self) -> Vec<PlayerId> {
+        self.state().players.keys().copied().collect()
+    }
+
+    // Escucha del micro (API)
+
+    /// Copia (o deja de copiar) las tramas del micro para [`Self::poll_mic`]. Solo las
+    /// que se reenvían: un silenciado no sale.
+    pub fn set_mic_tap(&self, on: bool) {
+        let mut st = self.state();
+        st.mic_tap = on;
+        if !on {
+            st.mic_frames.clear();
+        }
+    }
+
+    pub fn poll_mic(&self) -> Vec<MicFrame> {
+        self.state().mic_frames.drain(..).collect()
+    }
+
+    // Canales de audio (API)
+
+    /// Canal nuevo. `None` si ya hay [`channels::MAX_CHANNELS`] o Opus falla.
+    pub fn create_channel(&self, target: Target, range: f32, bitrate: i32, music: bool) -> Option<PlayerId> {
+        let channel = Channel::new(target, range, bitrate, music).ok()?;
+        let mut st = self.state();
+        if st.channels.len() >= channels::MAX_CHANNELS {
+            return None;
+        }
+        let id = channels::new_id();
+        st.channels.insert(id, channel);
+        Some(id)
+    }
+
+    pub fn set_channel_target(&self, id: &PlayerId, target: Target) -> bool {
+        self.state().channels.get_mut(id).map(|c| c.target = target).is_some()
+    }
+
+    pub fn set_channel_range(&self, id: &PlayerId, range: f32) -> bool {
+        self.state().channels.get_mut(id).map(|c| c.range = channels::clamp_range(range)).is_some()
+    }
+
+    pub fn remove_channel(&self, id: &PlayerId) -> bool {
+        self.state().channels.remove(id).is_some()
+    }
+
+    pub fn channel_count(&self) -> usize {
+        self.state().channels.len()
+    }
+
+    /// Codifica 20 ms de audio (960 muestras mono, -1..1) y lo envía por el canal.
+    /// Codifica en el hilo que llama, sin bloquear al relé.
+    pub fn channel_send_pcm(&self, id: &PlayerId, pcm: &[f32]) -> bool {
+        if pcm.len() != protocol::FRAME_SAMPLES {
+            return false;
+        }
+        let Some(encoder) = self.state().channels.get(id).map(|c| c.encoder.clone()) else { return false };
+        let opus = {
+            let mut enc = encoder.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            match enc.encode(pcm) {
+                Ok(o) => o.to_vec(),
+                Err(_) => return false,
+            }
+        };
+        self.channel_send_opus(id, &opus)
+    }
+
+    /// Envía una trama Opus ya codificada (20 ms, 48 kHz, mono).
+    pub fn channel_send_opus(&self, id: &PlayerId, opus: &[u8]) -> bool {
+        if opus.is_empty() || opus.len() > crate::codec::MAX_OPUS_FRAME {
+            return false;
+        }
+        let mut out = Vec::new();
+        let mut jobs = Vec::new();
+        let sent = self.shared.route_channel(id, opus, &mut out, &mut jobs);
+        self.shared.send_udp(out);
+        let n = crate::fanout::seal_and_send(&self.shared.socket, jobs);
+        self.shared.stats.packets_out.fetch_add(n as u64, Ordering::Relaxed);
+        sent
+    }
+
     pub fn set_max_distance(&self, d: f32) {
         self.state().ranges.normal = d.max(1.0);
     }
@@ -595,7 +762,7 @@ impl VoiceServer {
                 return Ok(());
             }
             st.set_group(player, Some(id), out);
-            st.push_event(GroupEventKind::Joined, st.groups[&id].name.clone(), *player);
+            st.push_event(EventKind::Joined, st.groups[&id].name.clone(), *player);
             Ok(())
         })
     }
@@ -610,7 +777,7 @@ impl VoiceServer {
                     st.save();
                 }
             }
-            st.push_event(GroupEventKind::Left, name, *player);
+            st.push_event(EventKind::Left, name, *player);
             st.after_member_left(g, player, out);
             true
         })
@@ -627,7 +794,7 @@ impl VoiceServer {
             st.set_group(target, None, out);
             st.groups.get_mut(&g).unwrap().saved_members.remove(target);
             st.save();
-            st.push_event(GroupEventKind::Kicked, name.clone(), *target);
+            st.push_event(EventKind::Kicked, name.clone(), *target);
             st.after_member_left(g, target, out);
             Ok(name)
         })
@@ -640,16 +807,7 @@ impl VoiceServer {
             if !admin && st.groups[&g].owner != Some(*requester) {
                 return Err(GroupError::NotOwner);
             }
-            let members: Vec<PlayerId> = st.members_of(g);
-            let group = st.groups.get_mut(&g).unwrap();
-            group.persistent = persistent;
-            group.saved_members = if persistent { members.iter().copied().collect() } else { HashSet::new() };
-            let name = group.name.clone();
-            st.save();
-            for m in members {
-                st.send_group_state(&m, out);
-            }
-            Ok(name)
+            Ok(st.apply_persistent(g, persistent, out))
         })
     }
 
@@ -666,9 +824,44 @@ impl VoiceServer {
             }
             st.groups.remove(&g);
             st.save();
-            st.push_event(GroupEventKind::Deleted, real_name.clone(), *requester);
+            st.push_event(EventKind::Deleted, real_name.clone(), *requester);
             Ok(real_name)
         })
+    }
+
+    /// Mete a un jugador en un grupo sin pedir contraseña (plugins).
+    pub fn force_join_group(&self, player: &PlayerId, name: &str) -> Result<(), GroupError> {
+        self.with_state(|st, out| {
+            if !st.players.contains_key(player) {
+                return Err(GroupError::UnknownPlayer);
+            }
+            let id = st.find_group(name.trim()).ok_or(GroupError::NotFound)?;
+            if st.players[player].group == Some(id) {
+                return Ok(());
+            }
+            st.set_group(player, Some(id), out);
+            st.push_event(EventKind::Joined, st.groups[&id].name.clone(), *player);
+            Ok(())
+        })
+    }
+
+    /// Hace permanente (o temporal) un grupo por su nombre, sin mirar quién lo pide
+    /// (plugins). Un grupo temporal sin nadie dentro se borra.
+    pub fn set_group_persistent_by_name(&self, name: &str, persistent: bool) -> Result<String, GroupError> {
+        self.with_state(|st, out| {
+            let g = st.find_group(name.trim()).ok_or(GroupError::NotFound)?;
+            let real = st.apply_persistent(g, persistent, out);
+            st.cleanup_group(g);
+            Ok(real)
+        })
+    }
+
+    /// (dueño, contraseña sí/no, permanente) de un grupo.
+    pub fn group_info(&self, name: &str) -> Option<(Option<PlayerId>, bool, bool)> {
+        let st = self.state();
+        let g = st.find_group(name.trim())?;
+        let group = &st.groups[&g];
+        Some((group.owner, group.password.is_some(), group.persistent))
     }
 
     pub fn group_of(&self, player: &PlayerId) -> Option<String> {
@@ -702,8 +895,8 @@ impl VoiceServer {
         st.find_group(name).map(|g| st.members_of(g)).unwrap_or_default()
     }
 
-    /// Eventos de grupo pendientes (Java avisa por chat).
-    pub fn poll_events(&self) -> Vec<GroupEvent> {
+    /// Eventos pendientes, en orden.
+    pub fn poll_events(&self) -> Vec<ServerEvent> {
         self.state().events.drain(..).collect()
     }
 
@@ -833,11 +1026,35 @@ impl State {
         self.players.iter().filter(|(_, p)| p.group == Some(g)).map(|(id, _)| *id).collect()
     }
 
-    fn push_event(&mut self, kind: GroupEventKind, group: String, player: PlayerId) {
+    fn push_event(&mut self, kind: EventKind, detail: String, player: PlayerId) {
         if self.events.len() >= EVENTS_MAX {
             self.events.pop_front();
         }
-        self.events.push_back(GroupEvent { kind, group, player });
+        self.events.push_back(ServerEvent { kind, player, detail });
+    }
+
+    /// Hace permanente o temporal un grupo, lo guarda y avisa a sus miembros.
+    fn apply_persistent(&mut self, g: u32, persistent: bool, out: &mut Outgoing) -> String {
+        let members: Vec<PlayerId> = self.members_of(g);
+        let group = self.groups.get_mut(&g).unwrap();
+        group.persistent = persistent;
+        group.saved_members = if persistent { members.iter().copied().collect() } else { HashSet::new() };
+        let name = group.name.clone();
+        self.save();
+        for m in members {
+            self.send_group_state(&m, out);
+        }
+        name
+    }
+
+    /// Eventos de un jugador que deja el relé (sale, o se le vuelve a registrar).
+    fn note_gone(&mut self, id: &PlayerId, p: &Player) {
+        if p.speaking {
+            self.push_event(EventKind::StoppedSpeaking, String::new(), *id);
+        }
+        if !matches!(p.transport, Transport::Pending) {
+            self.push_event(EventKind::Disconnected, String::new(), *id);
+        }
     }
 
     /// Cambia el grupo de un jugador y se lo notifica.
@@ -883,7 +1100,7 @@ impl State {
             group.owner = members.first().copied();
             if let Some(new_owner) = group.owner {
                 let name = group.name.clone();
-                self.push_event(GroupEventKind::NewOwner, name, new_owner);
+                self.push_event(EventKind::NewOwner, name, new_owner);
                 self.send_group_state(&new_owner, out);
             }
         }
@@ -1037,10 +1254,111 @@ impl Shared {
             tick = tick.wrapping_add(1);
             if tick.is_multiple_of(CROWD_PLAN_EVERY) {
                 self.plan_crowds();
+                self.sweep_speaking();
                 mixer.cleanup(Instant::now());
             }
             self.mix_crowds(&mut mixer, tick);
         }
+    }
+
+    /// Quien lleva un rato sin sonar deja de hablar.
+    fn sweep_speaking(&self) {
+        let mut st = self.state.lock().unwrap();
+        let now = Instant::now();
+        let quiet: Vec<PlayerId> = st
+            .players
+            .iter_mut()
+            .filter(|(_, p)| p.speaking && !p.last_audio.is_some_and(|t| now.duration_since(t) < ACTIVE_SPEAKER))
+            .map(|(id, p)| {
+                p.speaking = false;
+                *id
+            })
+            .collect();
+        for id in quiet {
+            st.push_event(EventKind::StoppedSpeaking, String::new(), id);
+        }
+    }
+
+    /// Envía una trama de un canal a quien le toque. false si el canal no existe.
+    fn route_channel(&self, id: &PlayerId, opus: &[u8], out: &mut Outgoing, jobs: &mut Vec<SealJob>) -> bool {
+        let mut guard = self.state.lock().unwrap();
+        let st = &mut *guard;
+        let Some(channel) = st.channels.get_mut(id) else { return false };
+        channel.seq = channel.seq.wrapping_add(1);
+        let (seq, range, target) = (channel.seq, channel.range, channel.target.clone());
+        let origin = match &target {
+            Target::Point { pos, dim } => Some((*pos, *dim)),
+            Target::Follow(p) => match st.players.get(p) {
+                Some(p) => Some((p.pos, p.dimension)),
+                None => return true, // no está: se pierde la trama, el canal sigue
+            },
+            Target::Listeners(_) | Target::Group(_) => None,
+        };
+        let group_id = match &target {
+            Target::Group(name) => match st.find_group(name) {
+                Some(g) => Some(g),
+                None => return true,
+            },
+            _ => None,
+        };
+        let rules = st.role_rules;
+        let recipients: Vec<PlayerId> = st
+            .players
+            .iter()
+            .filter(|(pid, l)| {
+                if matches!(l.transport, Transport::Pending) {
+                    return false;
+                }
+                match (&target, origin) {
+                    (_, Some((pos, dim))) => {
+                        if l.dimension != dim || !rules.can_hear(Role::Alive, l.role) {
+                            return false;
+                        }
+                        let d = [pos[0] - l.pos[0], pos[1] - l.pos[1], pos[2] - l.pos[2]];
+                        d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= (range as f64) * (range as f64)
+                    }
+                    (Target::Listeners(set), None) => set.contains(*pid),
+                    (Target::Group(_), None) => l.group == group_id,
+                    _ => false,
+                }
+            })
+            .map(|(pid, _)| *pid)
+            .collect();
+        let template = AudioDown {
+            sender: *id,
+            seq,
+            rel: [0.0; 3],
+            range: if origin.is_some() { range } else { 0.0 },
+            group: origin.is_none(),
+            underwater: false,
+            env: Environment::default(),
+            occlusion: OCCLUSION_UNKNOWN,
+            opus: opus.to_vec(),
+        }
+        .encode();
+        for pid in recipients {
+            let listener = st.players.get_mut(&pid).unwrap();
+            let rel = match origin {
+                Some((pos, _)) => [
+                    (pos[0] - listener.pos[0]) as f32,
+                    (pos[1] - listener.pos[1]) as f32,
+                    (pos[2] - listener.pos[2]) as f32,
+                ],
+                None => [0.0; 3],
+            };
+            let body = AudioDown::for_listener(&template, rel, OCCLUSION_UNKNOWN);
+            match listener.transport {
+                Transport::Udp(addr) => {
+                    listener.tx_counter += 1;
+                    jobs.push(SealJob { addr, key: listener.key, counter: listener.tx_counter, body });
+                }
+                _ => {
+                    let pkt = listener.seal(PacketType::AudioDown, &body);
+                    deliver(&self.stats, listener, pkt, out);
+                }
+            }
+        }
+        true
     }
 
     /// Para cada zona con oyentes, si le llegan más de `max_voices` voces, cuáles
@@ -1156,7 +1474,7 @@ impl Shared {
             .iter()
             .map(|(id, p)| {
                 let mut flags = p.self_flags & (PeerStates::MUTED | PeerStates::DEAFENED);
-                if !p.can_speak || st.admin_muted.contains(id) {
+                if !p.can_speak || st.admin_muted.contains(id) || (st.hush && !p.priority) {
                     flags |= PeerStates::MUTED;
                 }
                 if !matches!(p.transport, Transport::Pending) {
@@ -1227,7 +1545,7 @@ impl Shared {
                 return Err(());
             }
         }
-        let cave_echo = st.cave_echo;
+        let (cave_echo, hush) = (st.cave_echo, st.hush);
         let Some(sender) = st.players.get_mut(&sender_id) else {
             Self::note_bad_packet(st, source);
             return Err(());
@@ -1274,6 +1592,9 @@ impl Shared {
                 if first || raw.kind == PacketType::Hello {
                     st.send_group_state(&sender_id, out);
                 }
+                if first {
+                    st.push_event(EventKind::Connected, String::new(), sender_id);
+                }
             }
             PacketType::AudioUp => {
                 let from_ok = match (&sender.transport, source) {
@@ -1289,7 +1610,7 @@ impl Shared {
                 // Sin eco en el servidor, la voz sale sin el sitio del hablante: así
                 // tampoco lo oyen los clientes antiguos.
                 sender.env = if cave_echo { frame.env } else { Environment::default() };
-                if !sender.can_speak || st.admin_muted.contains(&sender_id) {
+                if !sender.can_speak || st.admin_muted.contains(&sender_id) || (hush && !sender.priority) {
                     return Ok(()); // silenciado: se acepta pero no se reenvía
                 }
                 let (src_pos, src_dim, group, env, underwater, src_role) =
@@ -1302,14 +1623,26 @@ impl Shared {
                     TalkMode::Shout if !sender.can_shout => TalkMode::Normal,
                     t => t,
                 };
-                let range = match talk {
+                let range = sender.range_override.unwrap_or(match talk {
                     TalkMode::Normal => st.ranges.normal,
                     TalkMode::Whisper => st.ranges.whisper,
                     TalkMode::Shout => st.ranges.shout,
-                };
+                });
                 sender.last_audio = Some(Instant::now());
                 sender.talk_range = range;
+                let started = !std::mem::replace(&mut sender.speaking, true);
                 let src_priority = sender.priority;
+                if started {
+                    let mode = if group.is_some() { "group" } else { talk.name() };
+                    st.push_event(EventKind::StartedSpeaking, mode.to_owned(), sender_id);
+                }
+                if st.mic_tap {
+                    if st.mic_frames.len() >= MIC_QUEUE_MAX {
+                        st.mic_frames.pop_front(); // nadie las recoge a tiempo: mejor perder las viejas
+                    }
+                    let opus = frame.opus.clone();
+                    st.mic_frames.push_back(MicFrame { player: sender_id, seq: frame.seq, talk, group: group.is_some(), opus });
+                }
 
                 let recipients: Vec<PlayerId> = st
                     .players
@@ -1401,6 +1734,11 @@ impl Shared {
                     return Err(());
                 }
                 sender.transport = Transport::Pending;
+                let was_speaking = std::mem::replace(&mut sender.speaking, false);
+                if was_speaking {
+                    st.push_event(EventKind::StoppedSpeaking, String::new(), sender_id);
+                }
+                st.push_event(EventKind::Disconnected, String::new(), sender_id);
             }
             // Esto no lo manda nunca un cliente.
             PacketType::AudioDown
@@ -1422,8 +1760,8 @@ mod tests {
         VoiceServer::start("127.0.0.1:0".parse().unwrap(), 48.0).unwrap()
     }
 
-    fn kinds(s: &VoiceServer) -> Vec<(GroupEventKind, String)> {
-        s.poll_events().into_iter().map(|e| (e.kind, e.group)).collect()
+    fn kinds(s: &VoiceServer) -> Vec<(EventKind, String)> {
+        s.poll_events().into_iter().map(|e| (e.kind, e.detail)).collect()
     }
 
     #[test]
@@ -1446,10 +1784,10 @@ mod tests {
         assert_eq!(
             kinds(&s),
             vec![
-                (GroupEventKind::Joined, "Equipo Rojo".into()),
-                (GroupEventKind::Left, "Equipo Rojo".into()),
-                (GroupEventKind::NewOwner, "Equipo Rojo".into()),
-                (GroupEventKind::Left, "Equipo Rojo".into()),
+                (EventKind::Joined, "Equipo Rojo".into()),
+                (EventKind::Left, "Equipo Rojo".into()),
+                (EventKind::NewOwner, "Equipo Rojo".into()),
+                (EventKind::Left, "Equipo Rojo".into()),
             ]
         );
         assert_eq!(s.create_group(&a, "   ", None), Err(GroupError::InvalidName));
@@ -1505,7 +1843,7 @@ mod tests {
         assert_eq!(s.list_groups().len(), 1);
         s.add_player(b);
         assert_eq!(s.group_of(&b).as_deref(), Some("Piratas"), "al volver entra solo en su grupo permanente");
-        assert_eq!(kinds(&s), vec![(GroupEventKind::Rejoined, "Piratas".into())]);
+        assert_eq!(kinds(&s), vec![(EventKind::Rejoined, "Piratas".into())]);
         assert_eq!(s.group_owner("piratas"), Some(a), "el dueño se mantiene aunque no esté conectado");
         assert_eq!(s.delete_group(&b, "piratas", false), Err(GroupError::NotOwner));
         assert_eq!(s.delete_group(&b, "piratas", true), Ok("Piratas".into()));

@@ -16,6 +16,7 @@ loom {
 
     mods {
         "ferrovoz" {
+            sourceSet sourceSets.api
             sourceSet sourceSets.main
             sourceSet sourceSets.client
         }
@@ -46,13 +47,25 @@ repositories {
     }
 }
 
+// --- API para otros mods y plugins (dev.ferrovoz.api) ---
+// Fuentes aparte (src/api) sin Minecraft ni dependencias, compiladas para Java 21 para
+// que la usen también los proyectos de 1.21.1. Va dentro del jar del mod y además en
+// su propio jar (apiJar) para compilar contra ella.
+sourceSets {
+    api {}
+    main {
+        compileClasspath += sourceSets.api.output
+        runtimeClasspath += sourceSets.api.output
+    }
+}
+
 // --- Plugin de Paper/Spigot/Purpur ---
 // Fuentes aparte (src/bukkit) compiladas contra la API de Paper, sin mezclarse con
 // las clases de Minecraft del mod. Van en el mismo jar: Fabric lee fabric.mod.json y
 // Paper lee plugin.yml.
 sourceSets {
     bukkit {
-        compileClasspath += sourceSets.main.output
+        compileClasspath += sourceSets.main.output + sourceSets.api.output
     }
 }
 
@@ -63,18 +76,20 @@ sourceSets {
 // META-INF/mods.toml.
 sourceSets {
     neoforge {
-        compileClasspath += sourceSets.main.output + sourceSets.client.output + sourceSets.client.compileClasspath
+        compileClasspath += sourceSets.main.output + sourceSets.api.output + sourceSets.client.output + sourceSets.client.compileClasspath
     }
     forge {
-        compileClasspath += sourceSets.main.output + sourceSets.client.output + sourceSets.client.compileClasspath
+        compileClasspath += sourceSets.main.output + sourceSets.api.output + sourceSets.client.output + sourceSets.client.compileClasspath
     }
     // Proxies (Velocity, BungeeCord): solo la parte sin Minecraft (FerrovozNative,
     // SetupMessage, Protocol). Mismo jar: Velocity lee velocity-plugin.json y
     // BungeeCord bungee.yml.
     proxy {
-        compileClasspath += sourceSets.main.output
+        compileClasspath += sourceSets.main.output + sourceSets.api.output
     }
 }
+sourceSets.client.compileClasspath += sourceSets.api.output
+sourceSets.client.runtimeClasspath += sourceSets.api.output
 
 dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
@@ -138,6 +153,7 @@ tasks.withType(Jar).configureEach {
 }
 
 jar {
+    from sourceSets.api.output
     from sourceSets.bukkit.output
     from sourceSets.neoforge.output
     from sourceSets.forge.output
@@ -222,4 +238,54 @@ java {
     withSourcesJar()
     sourceCompatibility = JavaVersion.VERSION_25
     targetCompatibility = JavaVersion.VERSION_25
+}
+
+// La API en Java 21 (después del configureEach de arriba, para que mande este).
+tasks.named('compileApiJava', JavaCompile) {
+    options.release = 21
+}
+
+tasks.named('sourcesJar', Jar) {
+    from sourceSets.api.allSource
+}
+
+// Jars de la API para quien compila contra ella: ferrovoz-api-<versión>.jar, con
+// fuentes y javadoc. No dependen de la versión de Minecraft.
+tasks.register('apiJar', Jar) {
+    group = 'build'
+    description = 'Jar de la API de Ferrovoz para otros mods y plugins'
+    from sourceSets.api.output
+    from('../LICENSE') {
+        rename { "${it}_ferrovoz-api" }
+    }
+    destinationDirectory = layout.buildDirectory.dir('libs')
+    archiveFileName = "ferrovoz-api-${project.mod_version}.jar".toString()
+}
+
+tasks.register('apiSourcesJar', Jar) {
+    group = 'build'
+    from sourceSets.api.allSource
+    destinationDirectory = layout.buildDirectory.dir('libs')
+    archiveFileName = "ferrovoz-api-${project.mod_version}-sources.jar".toString()
+}
+
+tasks.register('apiJavadoc', Javadoc) {
+    source = sourceSets.api.allJava
+    classpath = sourceSets.api.compileClasspath
+    destinationDir = layout.buildDirectory.dir('docs/api-javadoc').get().asFile
+    title = "Ferrovoz API ${project.mod_version}"
+    options.encoding = 'UTF-8'
+    options.addStringOption('Xdoclint:none', '-quiet')
+}
+
+tasks.register('apiJavadocJar', Jar) {
+    group = 'build'
+    dependsOn 'apiJavadoc'
+    from tasks.named('apiJavadoc')
+    destinationDirectory = layout.buildDirectory.dir('libs')
+    archiveFileName = "ferrovoz-api-${project.mod_version}-javadoc.jar".toString()
+}
+
+tasks.named('assemble') {
+    dependsOn 'apiJar', 'apiSourcesJar', 'apiJavadocJar'
 }

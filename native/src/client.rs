@@ -732,7 +732,7 @@ impl VoiceClient {
             .unwrap()
             .speakers
             .iter()
-            .filter(|(id, s)| now.duration_since(s.last_packet) < SPEAKING_WINDOW && **id != protocol::CROWD_ID)
+            .filter(|(id, s)| now.duration_since(s.last_packet) < SPEAKING_WINDOW && !crate::channels::is_virtual(id))
             .map(|(id, s)| (*id, s.group))
             .collect()
     }

@@ -27,6 +27,12 @@ interface PlayerScheduling {
 
     void untrack(UUID player);
 
+    /**
+     * Ejecuta {@code task} cada {@code periodTicks} fuera de cualquier jugador: en el hilo
+     * principal (Paper, Spigot) o en el planificador global (Folia).
+     */
+    void repeatGlobally(Runnable task, long periodTicks);
+
     static PlayerScheduling create(JavaPlugin plugin) {
         if (classExists("io.papermc.paper.threadedregions.scheduler.EntityScheduler")) {
             return new PaperScheduling(plugin);

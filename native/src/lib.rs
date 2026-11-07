@@ -9,6 +9,8 @@
 pub mod client;
 pub mod forwarder;
 pub mod codec;
+pub mod channels;
+mod api_jni;
 pub mod crowd;
 pub mod denoise;
 pub mod jitter;
@@ -1013,7 +1015,8 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverGroupMembers(mut e
     long_array(&env, &v)
 }
 
-/// `["tipo|grupo|uuid", ...]` con tipo = join, leave, kick, rejoin, owner o delete.
+/// `["tipo|uuid|detalle", ...]`, en orden (ver `server::EventKind`). El detalle va al
+/// final porque puede llevar cualquier carácter.
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverPollEvents(mut env: JNIEnv, _: JClass, h: jlong) -> jobjectArray {
     let items: Vec<String> = guard(Vec::new(), || {
@@ -1021,7 +1024,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverPollEvents(mut env
             .map(|s| {
                 s.poll_events()
                     .into_iter()
-                    .map(|e| format!("{}|{}|{}", e.kind.name(), e.group, protocol::uuid_to_string(&e.player)))
+                    .map(|e| format!("{}|{}|{}", e.kind.name(), protocol::uuid_to_string(&e.player), e.detail))
                     .collect()
             })
             .unwrap_or_default()

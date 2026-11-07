@@ -8,9 +8,20 @@ pub struct VoiceEncoder {
     out: Vec<u8>,
 }
 
+/// Tamaño máximo de un paquete Opus de 20 ms (RFC 6716).
+pub const MAX_OPUS_FRAME: usize = 1275;
+
 impl VoiceEncoder {
+    /// Para voz.
     pub fn new(bitrate: i32) -> Result<Self, opus::Error> {
-        let mut inner = opus::Encoder::new(SAMPLE_RATE, Channels::Mono, Application::Voip)?;
+        Self::with_application(bitrate, false)
+    }
+
+    /// `music = true` para música y efectos (modo `Audio` de Opus): menos agresivo con
+    /// lo que no es voz.
+    pub fn with_application(bitrate: i32, music: bool) -> Result<Self, opus::Error> {
+        let app = if music { Application::Audio } else { Application::Voip };
+        let mut inner = opus::Encoder::new(SAMPLE_RATE, Channels::Mono, app)?;
         inner.set_bitrate(Bitrate::Bits(bitrate))?;
         // FEC en banda: cada paquete lleva una copia de baja calidad del anterior.
         inner.set_inband_fec(true)?;

@@ -96,6 +96,15 @@ jobs:
         run: |
           ldd out/${{ matrix.server_lib }}
           ! ldd out/${{ matrix.server_lib }} | grep -q asound
+      # La API de Java para plugins, contra la librería que se acaba de compilar.
+      - uses: actions/setup-java@v4
+        if: matrix.platform == 'linux-x86_64'
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: API de Java contra el núcleo
+        if: matrix.platform == 'linux-x86_64'
+        run: FERROVOZ_LIB="$PWD/native/out/${{ matrix.server_lib }}" tools/api_test.sh
       - uses: actions/upload-artifact@v4
         with:
           name: native-${{ matrix.platform }}
@@ -201,16 +210,26 @@ jobs:
             unzip -l "dist/$NAME" | grep -q "natives/$p/" || { echo "Falta natives/$p en el jar"; exit 1; }
           done
           # Y los descriptores de Fabric, NeoForge, Forge, Paper/Spigot, Velocity y BungeeCord.
-          for f in fabric.mod.json META-INF/neoforge.mods.toml META-INF/mods.toml plugin.yml pack.mcmeta velocity-plugin.json bungee.yml; do
+          for f in fabric.mod.json META-INF/neoforge.mods.toml META-INF/mods.toml plugin.yml pack.mcmeta velocity-plugin.json bungee.yml \
+                   dev/ferrovoz/api/FerrovozApi.class; do
             unzip -l "dist/$NAME" | grep -q " $f\$" || { echo "Falta $f en el jar"; exit 1; }
+          done
+          # La API para otros mods y plugins, en su propio jar (vale para las dos versiones).
+          for f in "ferrovoz-api-$VERSION.jar" "ferrovoz-api-$VERSION-sources.jar" "ferrovoz-api-$VERSION-javadoc.jar"; do
+            cp "jar/$f" dist/ || { echo "Falta $f"; exit 1; }
           done
           # Minecraft 1.21.1: también un solo jar (Fabric, NeoForge, Forge, Paper y proxies).
           JAR_1211="ferrovoz-1.21.1-$VERSION.jar"
           cp "jar/$JAR_1211" dist/
           for f in fabric.mod.json META-INF/neoforge.mods.toml META-INF/mods.toml plugin.yml pack.mcmeta velocity-plugin.json bungee.yml \
-                   dev/ferrovoz/FerrovozNative.class dev/ferrovoz/intermediary/fabric/FerrovozFabric.class dev/ferrovoz/neoforge/FerrovozNeoForge.class; do
+                   dev/ferrovoz/FerrovozNative.class dev/ferrovoz/intermediary/fabric/FerrovozFabric.class dev/ferrovoz/neoforge/FerrovozNeoForge.class \
+                   dev/ferrovoz/api/FerrovozApi.class dev/ferrovoz/intermediary/ApiCore.class; do
             unzip -l "dist/$JAR_1211" | grep -q " $f\$" || { echo "Falta $f en $JAR_1211"; exit 1; }
           done
+          # La API no se reubica en la copia de Fabric: los demás mods la buscan en dev.ferrovoz.api.
+          if unzip -l "dist/$JAR_1211" | grep -q "dev/ferrovoz/intermediary/api/"; then
+            echo "La API está reubicada en $JAR_1211"; exit 1
+          fi
           for p in windows-x86_64 linux-x86_64 linux-aarch64 macos-aarch64 macos-x86_64; do
             unzip -l "dist/$JAR_1211" | grep -q "natives/$p/" || { echo "Falta natives/$p en $JAR_1211"; exit 1; }
           done

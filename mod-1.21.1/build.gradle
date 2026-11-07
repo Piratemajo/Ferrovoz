@@ -53,6 +53,7 @@ loom {
 
     mods {
         "ferrovoz" {
+            sourceSet sourceSets.api
             sourceSet sourceSets.main
             sourceSet sourceSets.client
         }
@@ -89,12 +90,25 @@ repositories {
 def SHARED_MAIN = [
         'FerrovozConfig', 'FerrovozLog', 'FerrovozNative', 'Messages', 'Protocol', 'SetupMessage',
         'SoundGeometry', 'TunnelPump', 'VoiceCommands', 'WallScheduler', 'WallTracer',
+        'ApiCore', 'ApiAudio', 'VoiceEventBus',
 ].collect { "dev/ferrovoz/${it}.java".toString() }
 def SHARED_CLIENT = [
         'ClientConfig', 'ReplayAudioOut', 'ReplayCompat', 'VoiceSlider',
 ].collect { "dev/ferrovoz/client/${it}.java".toString() }
 // Recursos de ../mod que no valen para 1.21.1 (aquí tienen su propia versión).
 def NOT_SHARED_RESOURCES = ['fabric.mod.json', 'pack.mcmeta']
+
+// La API para otros mods y plugins (../mod/src/api): la misma en todas las versiones.
+sourceSets {
+    api {
+        java.srcDirs = [new File(sharedSrc, 'api/java')]
+        resources.srcDirs = []
+    }
+    main {
+        compileClasspath += sourceSets.api.output
+        runtimeClasspath += sourceSets.api.output
+    }
+}
 
 // Añade root a set, pero solo los archivos de keep (o todos menos los de drop).
 def addShared = { SourceDirectorySet set, File root, List<String> keep, List<String> drop ->
@@ -117,23 +131,25 @@ sourceSets {
     bukkit {
         java.srcDirs = [new File(sharedSrc, 'bukkit/java')]
         resources.srcDirs = [new File(sharedSrc, 'bukkit/resources')]
-        compileClasspath += sourceSets.main.output
+        compileClasspath += sourceSets.main.output + sourceSets.api.output
     }
     // Velocity y BungeeCord: no dependen de la versión de Minecraft.
     proxy {
         java.srcDirs = [new File(sharedSrc, 'proxy/java')]
         resources.srcDirs = [new File(sharedSrc, 'proxy/resources')]
-        compileClasspath += sourceSets.main.output
+        compileClasspath += sourceSets.main.output + sourceSets.api.output
     }
     // NeoForge 21.1 y Forge 52 usan los nombres de Mojang, igual que el Minecraft de
     // Loom con officialMojangMappings(): se compilan contra él más la API de cada uno.
     neoforge {
-        compileClasspath += sourceSets.main.output + sourceSets.client.output + sourceSets.client.compileClasspath
+        compileClasspath += sourceSets.main.output + sourceSets.api.output + sourceSets.client.output + sourceSets.client.compileClasspath
     }
     forge {
-        compileClasspath += sourceSets.main.output + sourceSets.client.output + sourceSets.client.compileClasspath
+        compileClasspath += sourceSets.main.output + sourceSets.api.output + sourceSets.client.output + sourceSets.client.compileClasspath
     }
 }
+sourceSets.client.compileClasspath += sourceSets.api.output
+sourceSets.client.runtimeClasspath += sourceSets.api.output
 
 dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
@@ -273,11 +289,14 @@ remapJar {
  * Nombre de una clase en la copia de Fabric. FerrovozNative no se mueve: Rust enlaza
  * sus métodos nativos por nombre (Java_dev_ferrovoz_FerrovozNative_...). Tampoco
  * FerrovozLog, que es lo único que usa. Las dos no tocan el juego y valen para todos.
+ * La API (dev.ferrovoz.api) tampoco: otros mods la usan con ese nombre, y no está en la
+ * copia de Fabric (va en su propio source set), así que solo hay una.
  */
 static String fabricName(String name) {
     String base = 'dev/ferrovoz/'
     if (!name.startsWith(base)) return name
     String rest = name.substring(base.length())
+    if (rest.startsWith('api/')) return name
     String top = rest.contains('$') ? rest.substring(0, rest.indexOf('$')) : rest
     if (top == 'FerrovozNative' || top == 'FerrovozLog') return name
     return base + 'intermediary/' + rest
@@ -346,6 +365,7 @@ tasks.register('universalJar', Jar) {
     from(sourceSets.client.output) {
         exclude 'dev/ferrovoz/fabric/**'
     }
+    from(sourceSets.api.output)
     from(sourceSets.neoforge.output)
     from(sourceSets.forge.output)
     from(zipTree(relocatedFabricJar))

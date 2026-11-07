@@ -154,6 +154,14 @@ pub enum TalkMode {
 }
 
 impl TalkMode {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Whisper => "whisper",
+            Self::Shout => "shout",
+        }
+    }
+
     pub fn from_u8(v: u8) -> Self {
         match v {
             1 => Self::Whisper,

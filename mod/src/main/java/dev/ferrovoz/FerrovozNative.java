@@ -292,7 +292,11 @@ public final class FerrovozNative {
     public static native long[] serverGroupOwner(long handle, String name);
     /** {@code [msb0, lsb0, ...]} de los miembros conectados. */
     public static native long[] serverGroupMembers(long handle, String name);
-    /** {@code ["tipo|grupo|uuid", ...]}: join, leave, kick, rejoin, owner, delete. */
+    /**
+     * {@code ["tipo|uuid|detalle", ...]}, en orden. Tipos: join, leave, kick, rejoin, owner,
+     * delete (detalle = grupo), connect, disconnect, silent y speak (detalle = normal,
+     * whisper, shout o group).
+     */
     public static native String[] serverPollEvents(long handle);
     /** {@code [hablaMsb, hablaLsb, oyeMsb, oyeLsb, ...]}: pares activos (para la oclusión). */
     public static native long[] serverActivePairs(long handle);
@@ -331,6 +335,53 @@ public final class FerrovozNative {
                                                long[] ids, String[] names);
     /** {@code [rutas, subidos, bajados, rechazados, replay, voz de grupos de red]}. */
     public static native long[] proxyStatus(long handle);
+
+    // --- API para plugins (dev.ferrovoz.api) ---
+    /** Bits de {@link #serverPlayerState}. */
+    public static final int STATE_REGISTERED = 1, STATE_CONNECTED = 2, STATE_SPEAKING = 4,
+            STATE_SELF_MUTED = 8, STATE_DEAFENED = 16;
+
+    /** Bits {@code STATE_*}; 0 si no está registrado. */
+    public static native int serverPlayerState(long handle, long uuidMsb, long uuidLsb);
+    /** {@code [msb0, lsb0, ...]} de los jugadores registrados. */
+    public static native long[] serverPlayers(long handle);
+    /** Alcance propio en bloques; {@code <= 0} lo quita. */
+    public static native void serverSetRangeOverride(long handle, long uuidMsb, long uuidLsb, float range);
+    public static native void serverSetHush(long handle, boolean hush);
+    public static native boolean serverIsHushed(long handle);
+    /** Como {@link #serverJoinGroup}, sin contraseña. */
+    public static native int serverForceJoinGroup(long handle, long uuidMsb, long uuidLsb, String name);
+    /** Códigos como {@link #serverCreateGroup}. */
+    public static native int serverSetGroupPersistentByName(long handle, String name, boolean persistent);
+    /** {@code [dueñoMsb, dueñoLsb, flags]}: tiene dueño 1, contraseña 2, permanente 4. null si no existe. */
+    public static native long[] serverGroupInfo(long handle, String name);
+    public static native void serverSetMicTap(long handle, boolean on);
+    /**
+     * Tramas del micro pendientes, seguidas (little endian):
+     * {@code uuid(16) seq(4) modo(1) flags(1) largo(2) opus}. flags 1 = grupo. null si no hay.
+     */
+    public static native byte[] serverPollMicrophone(long handle);
+    /** Canal de audio nuevo, sin oyentes: {@code [msb, lsb]}, o null si no se pudo. */
+    public static native long[] serverChannelCreate(long handle, float range, int bitrate, boolean music);
+    public static native boolean serverChannelPoint(long handle, long msb, long lsb, double x, double y, double z, int dimension);
+    public static native boolean serverChannelFollow(long handle, long msb, long lsb, long playerMsb, long playerLsb);
+    /** {@code players} = pares msb, lsb. */
+    public static native boolean serverChannelListeners(long handle, long msb, long lsb, long[] players);
+    public static native boolean serverChannelGroup(long handle, long msb, long lsb, String group);
+    public static native boolean serverChannelRange(long handle, long msb, long lsb, float range);
+    public static native void serverChannelRemove(long handle, long msb, long lsb);
+    /** 960 muestras por {@code gain}. false si el canal no existe o la trama no vale. */
+    public static native boolean serverChannelSendPcm(long handle, long msb, long lsb, short[] pcm, float gain);
+    public static native boolean serverChannelSendOpus(long handle, long msb, long lsb, byte[] opus);
+    /** 0 si Opus falla. */
+    public static native long opusEncoderCreate(int bitrate, boolean music);
+    /** null si la trama no es de 960 muestras o el codificador está cerrado. */
+    public static native byte[] opusEncode(long handle, short[] pcm);
+    public static native void opusEncoderClose(long handle);
+    public static native long opusDecoderCreate();
+    /** {@code packet} null = trama perdida. null si el decodificador está cerrado. */
+    public static native short[] opusDecode(long handle, byte[] packet);
+    public static native void opusDecoderClose(long handle);
 
     /** Grupo actual (null si ninguno). */
     public static native String clientGroupName(long handle);

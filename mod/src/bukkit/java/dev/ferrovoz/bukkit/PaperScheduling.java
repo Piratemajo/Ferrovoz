@@ -1,6 +1,7 @@
 package dev.ferrovoz.bukkit;
 
 import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
+import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -35,6 +36,11 @@ final class PaperScheduling implements PlayerScheduling {
             ScheduledTask old = tracking.put(id, scheduled);
             if (old != null) old.cancel();
         }
+    }
+
+    @Override
+    public void repeatGlobally(Runnable task, long periodTicks) {
+        Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin, t -> task.run(), periodTicks, periodTicks);
     }
 
     @Override

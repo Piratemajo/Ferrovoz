@@ -1,5 +1,9 @@
 package dev.ferrovoz;
 
+import dev.ferrovoz.api.event.GroupCreateEvent;
+import dev.ferrovoz.api.event.GroupJoinEvent;
+import dev.ferrovoz.api.event.PlayerMuteEvent;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -179,6 +183,7 @@ public final class VoiceCommands {
                     return;
                 }
                 String pass = a.length >= 3 ? a[2] : null;
+                if (!ApiCore.allowed(new GroupCreateEvent(me, a[1], pass != null))) return;
                 int r = FerrovozNative.serverCreateGroup(srv, msb, lsb, a[1], pass);
                 s.reply(r == 0 ? Messages.prefixed(lang, pass != null ? "group.created_locked" : "group.created", a[1])
                         : groupError(lang, r, a[1]));
@@ -188,6 +193,7 @@ public final class VoiceCommands {
                     s.reply(err(lang, "usage.join"));
                     return;
                 }
+                if (!ApiCore.allowed(new GroupJoinEvent(me, a[1]))) return;
                 int r = FerrovozNative.serverJoinGroup(srv, msb, lsb, a[1], a.length >= 3 ? a[2] : null);
                 s.reply(r == 0 ? Messages.prefixed(lang, "group.joined", FerrovozNative.serverGroupOf(srv, msb, lsb))
                         : groupError(lang, r, a[1]));
@@ -307,6 +313,7 @@ public final class VoiceCommands {
         long srv = h.voiceServer();
         long msb = target.getMostSignificantBits(), lsb = target.getLeastSignificantBits();
         boolean was = FerrovozNative.serverIsMuted(srv, msb, lsb);
+        if (was != mute && !ApiCore.allowed(new PlayerMuteEvent(target, mute, s.player()))) return;
         FerrovozNative.serverSetMuted(srv, msb, lsb, mute);
         String name = h.nameOf(target);
         if (was == mute) {
@@ -316,55 +323,62 @@ public final class VoiceCommands {
         }
     }
 
-    // --- Avisos de grupo ---
+    // --- Eventos del relé ---
 
     /**
-     * Recoge los eventos de grupo y avisa por chat a cada afectado en su idioma.
-     * Llamar periódicamente.
+     * Recoge los eventos del relé: avisa por chat a cada afectado de un grupo, en su
+     * idioma, y los pasa a la API. Llamar periódicamente, desde el hilo donde deban
+     * llegar los eventos de la API.
      */
     public static void dispatchEvents(Host h) {
         long srv = h.voiceServer();
         if (srv == 0) return;
         String[] events = FerrovozNative.serverPollEvents(srv);
         if (events == null) return;
+        ApiCore api = ApiCore.activeCore();
         for (String e : events) {
+            // tipo|uuid|detalle: el detalle va el último porque puede llevar '|'.
             String[] f = e.split("\\|", 3);
             if (f.length < 3) continue;
             UUID who;
             try {
-                who = UUID.fromString(f[2]);
+                who = UUID.fromString(f[1]);
             } catch (IllegalArgumentException ex) {
                 continue;
             }
-            String group = f[1];
-            String name = "§b" + h.nameOf(who) + "§r";
-            String toMembers = switch (f[0]) {
-                case "join" -> "event.join";
-                case "leave" -> "event.leave";
-                case "kick" -> "event.kick";
-                case "rejoin" -> "event.rejoin";
-                case "owner" -> "event.owner";
-                default -> null;
-            };
-            String toThem = switch (f[0]) {
-                case "kick" -> "event.kicked_you";
-                case "rejoin" -> "event.rejoined_you";
-                case "owner" -> "event.owner_you";
-                default -> null;
-            };
-            if (toThem != null) {
-                String l = h.localeOf(who);
-                String text = Messages.tr(l, toThem, group);
-                h.message(who, Messages.tr(l, "prefix") + " " + (f[0].equals("kick") ? ERR : "") + text);
-            }
-            if (toMembers == null) continue;
-            long[] members = FerrovozNative.serverGroupMembers(srv, group);
-            for (int i = 0; members != null && i + 1 < members.length; i += 2) {
-                UUID m = new UUID(members[i], members[i + 1]);
-                if (m.equals(who)) continue;
-                String l = h.localeOf(m);
-                h.message(m, Messages.tr(l, "prefix") + " §7[" + group + "]§r " + Messages.tr(l, toMembers, name));
-            }
+            groupNotice(h, srv, f[0], who, f[2]);
+            if (api != null) api.dispatch(f[0], who, f[2]);
+        }
+    }
+
+    private static void groupNotice(Host h, long srv, String kind, UUID who, String group) {
+        String toMembers = switch (kind) {
+            case "join" -> "event.join";
+            case "leave" -> "event.leave";
+            case "kick" -> "event.kick";
+            case "rejoin" -> "event.rejoin";
+            case "owner" -> "event.owner";
+            default -> null;
+        };
+        String toThem = switch (kind) {
+            case "kick" -> "event.kicked_you";
+            case "rejoin" -> "event.rejoined_you";
+            case "owner" -> "event.owner_you";
+            default -> null;
+        };
+        if (toThem != null) {
+            String l = h.localeOf(who);
+            String text = Messages.tr(l, toThem, group);
+            h.message(who, Messages.tr(l, "prefix") + " " + (kind.equals("kick") ? ERR : "") + text);
+        }
+        if (toMembers == null) return;
+        String name = "§b" + h.nameOf(who) + "§r";
+        long[] members = FerrovozNative.serverGroupMembers(srv, group);
+        for (int i = 0; members != null && i + 1 < members.length; i += 2) {
+            UUID m = new UUID(members[i], members[i + 1]);
+            if (m.equals(who)) continue;
+            String l = h.localeOf(m);
+            h.message(m, Messages.tr(l, "prefix") + " §7[" + group + "]§r " + Messages.tr(l, toMembers, name));
         }
     }
 

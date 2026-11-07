@@ -1,5 +1,6 @@
 package dev.ferrovoz.bukkit;
 
+import dev.ferrovoz.ApiCore;
 import dev.ferrovoz.FerrovozConfig;
 import dev.ferrovoz.FerrovozNative;
 import dev.ferrovoz.Protocol;
@@ -20,6 +21,7 @@ import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRegisterChannelEvent;
 import org.bukkit.command.PluginCommand;
+import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.Set;
@@ -34,6 +36,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>Folia: el código de cada jugador corre en el hilo de su región (ver
  * {@link PlayerScheduling}) y el estado compartido es concurrente. Las llamadas
  * nativas son seguras desde cualquier hilo.
+ *
+ * <p>La API ({@code dev.ferrovoz.api.FerrovozApi}) se registra también en el
+ * ServicesManager de Bukkit.
  */
 public final class FerrovozPlugin extends JavaPlugin implements Listener {
     private FerrovozConfig config;
@@ -47,6 +52,7 @@ public final class FerrovozPlugin extends JavaPlugin implements Listener {
     private final java.util.Map<UUID, Player> online = new ConcurrentHashMap<>();
     private final WallScheduler walls = new WallScheduler();
     private TunnelPump tunnel;
+    private ApiCore api;
     private java.util.concurrent.ScheduledExecutorService events;
 
     /** Jugadores a los que ya se ha enviado la versión (una vez por conexión). */
@@ -80,6 +86,30 @@ public final class FerrovozPlugin extends JavaPlugin implements Listener {
             return;
         }
 
+        api = new ApiCore(new ApiCore.Bridge() {
+            @Override
+            public String platform() {
+                return PlayerScheduling.isFolia() ? "Folia" : scheduling instanceof PaperScheduling ? "Paper" : "Spigot";
+            }
+
+            @Override
+            public String nameOf(UUID id) {
+                Player p = online.get(id);
+                if (p == null) p = Bukkit.getPlayer(id);
+                return p == null ? null : p.getName();
+            }
+
+            @Override
+            public dev.ferrovoz.api.VoiceWorld world(Object world) {
+                if (!(world instanceof World w)) {
+                    throw new IllegalArgumentException("se esperaba un org.bukkit.World: " + world.getClass().getName());
+                }
+                return new ApiCore.World(w.getName(), dimensionOf(w));
+            }
+        });
+        api.register();
+        getServer().getServicesManager().register(dev.ferrovoz.api.FerrovozApi.class, api, this, ServicePriority.Normal);
+
         config = FerrovozConfig.load(getDataFolder().toPath().resolve("ferrovoz.properties"));
         server = FerrovozNative.serverStart(config.bindHost, config.port, config.maxDistance);
         if (server == 0) {
@@ -111,15 +141,16 @@ public final class FerrovozPlugin extends JavaPlugin implements Listener {
             Player p = online.get(id);
             if (p != null) p.sendPluginMessage(this, Protocol.TUNNEL, SetupMessage.encodeTunnel(packet));
         });
-        // Avisos de grupo desde un hilo propio (vale igual en Folia).
+        api.started(server, config);
+        // Avisos de grupo y eventos de la API, cada tick en el hilo principal (en Folia, el global).
         VoiceCommands.Host host = handler.host();
-        events.scheduleAtFixedRate(() -> {
+        scheduling.repeatGlobally(() -> {
             try {
                 VoiceCommands.dispatchEvents(host);
             } catch (RuntimeException e) {
-                getLogger().warning("Group notice failed: " + e);
+                getLogger().warning("Voice event dispatch failed: " + e);
             }
-        }, 100, 100, java.util.concurrent.TimeUnit.MILLISECONDS);
+        }, 1L);
         // Oclusión con el mundo del servidor. En Folia no: leer bloques de otra región no
         // es seguro, así que allí solo la calcula el cliente.
         if (!PlayerScheduling.isFolia()) {
@@ -140,6 +171,10 @@ public final class FerrovozPlugin extends JavaPlugin implements Listener {
         // Las tareas las cancela el servidor al deshabilitar.
         if (tunnel != null) tunnel.close();
         if (events != null) events.shutdownNow();
+        if (api != null) {
+            api.stopping();
+            api.unregister();
+        }
         long s = server;
         server = 0;
         if (s != 0) {
@@ -183,8 +218,7 @@ public final class FerrovozPlugin extends JavaPlugin implements Listener {
         }
     }
 
-    /** Oclusión entre cada pareja activa (solo chunks cargados; nunca carga ninguno). */
-    /** Paredes calculadas en el servidor, con un coste fijo por tick. */
+    /** Paredes calculadas en el servidor, con un coste fijo por tick (solo chunks cargados). */
     private void updateWalls() {
         long s = server;
         if (s == 0) return;
@@ -293,14 +327,11 @@ public final class FerrovozPlugin extends JavaPlugin implements Listener {
         scheduling.trackEveryTick(player, () -> updatePosition(player));
     }
 
+    /** Permisos de Bukkit, más lo que haya forzado un plugin por la API. */
     private void syncPermissions(Player p) {
-        long s = server;
-        if (s == 0) return;
-        UUID id = p.getUniqueId();
-        FerrovozNative.serverSetPermissions(s, id.getMostSignificantBits(), id.getLeastSignificantBits(),
-                p.hasPermission(BukkitVoiceCommands.node(VoiceCommands.PERM_SPEAK)),
-                p.hasPermission(BukkitVoiceCommands.node(VoiceCommands.PERM_SHOUT)));
-        FerrovozNative.serverSetPriority(s, id.getMostSignificantBits(), id.getLeastSignificantBits(),
+        if (server == 0) return;
+        api.syncPlayer(p.getUniqueId(), p.hasPermission(BukkitVoiceCommands.node(VoiceCommands.PERM_SPEAK)),
+                p.hasPermission(BukkitVoiceCommands.node(VoiceCommands.PERM_SHOUT)),
                 p.hasPermission(BukkitVoiceCommands.node(VoiceCommands.PERM_PRIORITY)));
     }
 
@@ -321,6 +352,11 @@ public final class FerrovozPlugin extends JavaPlugin implements Listener {
         return b.getBlockData() instanceof org.bukkit.block.data.Waterlogged w && w.isWaterlogged();
     }
 
+    /** Cualquier entero que distinga mundos; el nombre es estable mientras corre el servidor. */
+    private static int dimensionOf(World world) {
+        return world.getName().hashCode();
+    }
+
     /** Vivo, espectador o muerto (para {@code spectators} y {@code dead}). */
     private static int roleOf(Player p) {
         if (p.getGameMode() == org.bukkit.GameMode.SPECTATOR) return FerrovozNative.ROLE_SPECTATOR;
@@ -335,8 +371,7 @@ public final class FerrovozPlugin extends JavaPlugin implements Listener {
         UUID id = p.getUniqueId();
         long msb = id.getMostSignificantBits(), lsb = id.getLeastSignificantBits();
         Location eye = p.getEyeLocation();
-        // Cualquier entero que distinga mundos; el nombre es estable mientras corre el servidor.
-        int dimension = eye.getWorld() == null ? 0 : eye.getWorld().getName().hashCode();
+        int dimension = eye.getWorld() == null ? 0 : dimensionOf(eye.getWorld());
         FerrovozNative.serverUpdatePlayer(s, msb, lsb, eye.getX(), eye.getY(), eye.getZ(), dimension, eyeInWater(eye), roleOf(p));
 
         // Permisos refrescados cada 5 s (LuckPerms puede cambiarlos en caliente).

@@ -18,7 +18,8 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Lado servidor (dedicado o integrado), común a Fabric, NeoForge y Forge. Arranca el
  * relé, le pasa entradas, salidas, posiciones y permisos, calcula la oclusión con el
- * mundo del servidor, avisa de los cambios en los grupos y registra {@code /voz}.
+ * mundo del servidor, avisa de los cambios en los grupos, registra {@code /voz} y
+ * pone la API para otros mods ({@link ApiCore}).
  *
  * <p>Cada loader implementa {@link Platform} y llama a los {@code on*} desde sus
  * eventos ({@code dev.ferrovoz.fabric}, {@code .neoforge}, {@code .forge}).
@@ -66,6 +67,8 @@ public final class Ferrovoz {
     private static final Map<UUID, ServerPlayer> registered = new ConcurrentHashMap<>();
     private static TunnelPump tunnel;
     private static VoiceCommands.Host host;
+    private static volatile MinecraftServer minecraft;
+    private static ApiCore api;
     private static int ticks;
 
     private Ferrovoz() {}
@@ -81,6 +84,29 @@ public final class Ferrovoz {
         Path configDir = p.configDir();
         config = FerrovozConfig.load(configDir.resolve("ferrovoz.properties"));
         dataFile = configDir.resolve("ferrovoz-data.txt");
+        api = new ApiCore(new ApiCore.Bridge() {
+            @Override
+            public String platform() {
+                return platform.name();
+            }
+
+            @Override
+            public String nameOf(UUID id) {
+                ServerPlayer player = registered.get(id);
+                MinecraftServer mc = minecraft;
+                if (player == null && mc != null) player = mc.getPlayerList().getPlayer(id);
+                return player == null ? null : player.getName().getString();
+            }
+
+            @Override
+            public dev.ferrovoz.api.VoiceWorld world(Object world) {
+                if (!(world instanceof Level level)) {
+                    throw new IllegalArgumentException("se esperaba un ServerLevel: " + world.getClass().getName());
+                }
+                return new ApiCore.World(dimensionName(level), dimensionOf(level));
+            }
+        });
+        api.register();
         if (Bench.enabled()) {
             LOG.warn("Ferrovoz in BENCHMARK mode ({} virtual players): the server will shut itself down when done", Bench.PLAYERS);
         }
@@ -100,6 +126,7 @@ public final class Ferrovoz {
 
     public static void onServerStarted(MinecraftServer srv) {
         if (!nativeLoaded) return;
+        minecraft = srv;
         server = FerrovozNative.serverStart(config.bindHost, config.port, config.maxDistance);
         if (server == 0) {
             LOG.error("Ferrovoz: could not open UDP port {}. Is it in use?", config.port);
@@ -118,11 +145,14 @@ public final class Ferrovoz {
             ServerPlayer p = registered.get(id);
             if (p != null) platform.sendTunnel(p, packet);
         });
+        api.started(server, config);
         LOG.info("Ferrovoz: voice chat running ({})", platform.name());
         Bench.start(srv); // solo con -Dferrovoz.bench=N
     }
 
     public static void onServerStopping() {
+        if (api != null) api.stopping();
+        minecraft = null;
         if (tunnel != null) {
             tunnel.close();
             tunnel = null;
@@ -197,13 +227,10 @@ public final class Ferrovoz {
         VanillaVoiceCommands.register(dispatcher, () -> server, () -> config);
     }
 
+    /** Permisos del loader, más lo que haya forzado un plugin por la API. */
     private static void syncPermissions(ServerPlayer p) {
-        UUID id = p.getUUID();
-        FerrovozNative.serverSetPermissions(server, id.getMostSignificantBits(), id.getLeastSignificantBits(),
-                platform.hasPermission(p, VoiceCommands.PERM_SPEAK),
-                platform.hasPermission(p, VoiceCommands.PERM_SHOUT));
-        FerrovozNative.serverSetPriority(server, id.getMostSignificantBits(), id.getLeastSignificantBits(),
-                platform.hasPermission(p, VoiceCommands.PERM_PRIORITY));
+        api.syncPlayer(p.getUUID(), platform.hasPermission(p, VoiceCommands.PERM_SPEAK),
+                platform.hasPermission(p, VoiceCommands.PERM_SHOUT), platform.hasPermission(p, VoiceCommands.PERM_PRIORITY));
     }
 
     /** Al empezar cada tick (solo para el benchmark). */
@@ -223,8 +250,7 @@ public final class Ferrovoz {
             // Al reaparecer el ServerPlayer es otro objeto: se guarda el actual para
             // que locate() no use la posición donde murió.
             if (registered.replace(id, p) == null) continue;
-            // El hash del ResourceKey identifica la dimensión sin depender de nombres de la API.
-            int dimension = p.level().dimension().toString().hashCode();
+            int dimension = dimensionOf(p.level());
             FerrovozNative.serverUpdatePlayer(s, id.getMostSignificantBits(), id.getLeastSignificantBits(),
                     p.getX(), p.getEyeY(), p.getZ(), dimension, p.isUnderWater(), roleOf(p));
             if (refreshPermissions) {
@@ -239,6 +265,19 @@ public final class Ferrovoz {
         walls.tick(s, Ferrovoz::eye);
         Bench.ferrovozTime(System.nanoTime() - started);
         Bench.onEndTick(srv, s);
+    }
+
+    /** El hash del ResourceKey identifica la dimensión sin depender de nombres de la API de cada versión. */
+    private static int dimensionOf(Level level) {
+        return level.dimension().toString().hashCode();
+    }
+
+    /** {@code minecraft:overworld}, sacado de {@code ResourceKey[minecraft:dimension / minecraft:overworld]}. */
+    private static String dimensionName(Level level) {
+        String key = level.dimension().toString();
+        int slash = key.lastIndexOf(" / ");
+        int end = key.endsWith("]") ? key.length() - 1 : key.length();
+        return slash >= 0 && slash + 3 <= end ? key.substring(slash + 3, end) : key;
     }
 
     /** Vivo, espectador o muerto (para {@code spectators} y {@code dead}). */

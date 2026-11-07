@@ -33,6 +33,11 @@ final class BukkitScheduling implements PlayerScheduling {
     }
 
     @Override
+    public void repeatGlobally(Runnable task, long periodTicks) {
+        Bukkit.getScheduler().runTaskTimer(plugin, task, periodTicks, periodTicks);
+    }
+
+    @Override
     public void untrack(UUID player) {
         tracking.remove(player);
     }
