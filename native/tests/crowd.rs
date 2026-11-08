@@ -54,8 +54,10 @@ impl Crowd {
         Self { server, listener, talkers }
     }
 
-    /// Hablan todos 1,5 s. Devuelve a quién oye por separado el oyente al final, si
-    /// le llega el murmullo y la energía que recibe.
+    /// Hablan todos 1,5 s. Devuelve a quién oye por separado el oyente, si le llega el
+    /// murmullo y la energía que recibe, mirando durante la segunda mitad (con el
+    /// reparto ya hecho) y no en un solo instante: en una máquina lenta, un parón del
+    /// hilo que mezcla justo al final haría creer que no hay murmullo.
     fn talk(&self) -> (HashSet<[u8; 16]>, bool, f32) {
         for t in &self.talkers {
             t.set_push_to_talk(true);
@@ -64,6 +66,8 @@ impl Crowd {
         // clientes en este hilo no llega a tiempo real en una máquina lenta.
         let mut out = vec![0f32; FRAME_SAMPLES * 2];
         let mut energy = 0f32;
+        let mut heard: HashSet<[u8; 16]> = HashSet::new();
+        let mut crowd = false;
         let start = Instant::now();
         for n in 0..75u32 {
             for (k, t) in self.talkers.iter().enumerate() {
@@ -77,10 +81,10 @@ impl Crowd {
             self.listener.render(&mut out);
             if n > 40 {
                 energy += out.iter().map(|s| s * s).sum::<f32>();
+                heard.extend(self.listener.speaking_players().into_iter().map(|(id, _)| id));
+                crowd |= self.listener.hearing_crowd();
             }
         }
-        let heard: HashSet<[u8; 16]> = self.listener.speaking_players().into_iter().map(|(id, _)| id).collect();
-        let crowd = self.listener.hearing_crowd();
         for t in &self.talkers {
             t.set_push_to_talk(false);
         }
@@ -110,8 +114,10 @@ fn the_event_host_is_always_heard_separately() {
     // El más lejano es el anfitrión.
     c.server.set_priority(&id(TALKERS), true);
     let (heard, crowd, _) = c.talk();
-    assert!(crowd);
+    assert!(crowd, "con 30 voces y límite 24 sigue habiendo murmullo");
     assert!(heard.contains(&id(TALKERS)), "el anfitrión va siempre por separado");
+    // El anfitrión no cuenta para el límite: las 24 más cercanas y él.
+    assert!(heard.len() <= 25, "como mucho 24 más el anfitrión, llegan {}", heard.len());
 }
 
 #[test]
