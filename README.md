@@ -116,7 +116,7 @@ Java solo hace de pegamento con el juego; captura, códec, red, cifrado, mezcla 
 Necesitas **Rust** (stable), **JDK 25** y, en Linux, `libasound2-dev` y `cmake`.
 
 ```bash
-cd native && cargo test          # 156 tests: unitarios + extremo a extremo por red (incluidos ataques)
+cd native && cargo test          # 163 tests: unitarios + extremo a extremo por red (incluidos ataques)
 cd ../mod && ./gradlew build     # compila Rust (con y sin audio) y lo mete en el .jar
 ```
 
@@ -301,7 +301,7 @@ Antes de la 0.9 (un solo hilo, un envío por paquete) el caso extremo se quedaba
 
 ## Licencias
 
-Ferrovoz es MIT. El jar incluye `META-INF/THIRD_PARTY_LICENSES.txt` con las licencias de todo lo que llevan dentro las librerías nativas: libopus (BSD-3), RNNoise (BSD-3), el procesado de audio de WebRTC portado a Rust (`sonora`, BSD-3) y 93 crates de Rust (MIT, Apache-2.0, BSD, ISC…). Se genera con `python3 tools/third_party_licenses.py` y el CI falla si las dependencias cambian y el archivo no se actualiza.
+Ferrovoz es MIT. El jar incluye `META-INF/THIRD_PARTY_LICENSES.txt` con las licencias de todo lo que llevan dentro las librerías nativas: libopus (BSD-3), RNNoise (BSD-3), el procesado de audio de WebRTC portado a Rust (`sonora`, BSD-3) y 98 crates de Rust (MIT, Apache-2.0, BSD, ISC…). Se genera con `python3 tools/third_party_licenses.py` y el CI falla si las dependencias cambian y el archivo no se actualiza.
 
 ## Tests
 
@@ -309,7 +309,7 @@ Ferrovoz es MIT. El jar incluye `META-INF/THIRD_PARTY_LICENSES.txt` con las lice
 cd native && cargo test --release
 ```
 
-156 tests: unitarios (audio, cifrado, jitter buffer, HRTF, reverb, AEC/AGC, mezcla de multitudes...) y de extremo a extremo con un relé real por UDP en localhost: alcances, grupos, permisos, túnel, pérdida de paquetes, ataques de replay y flood, reglas de espectadores, repeticiones, multitudes y anfitrión, voz a través del proxy y lo que usa la API (canales de audio, megáfono, silencio general, escucha del micro, eventos). La prueba de carga está en [Rendimiento](#rendimiento).
+163 tests: unitarios (audio, cifrado, jitter buffer, HRTF, reverb, AEC/AGC, mezcla de multitudes...) y de extremo a extremo con un relé real por UDP en localhost: alcances, grupos, permisos, túnel, pérdida de paquetes, ataques de replay y flood, reglas de espectadores, repeticiones, multitudes y anfitrión, voz a través del proxy y lo que usa la API (canales de audio, megáfono, silencio general, escucha del micro, eventos). La prueba de carga está en [Rendimiento](#rendimiento).
 
 La API de Java se prueba aparte contra la librería nativa real, sin Minecraft (Java 21 y Rust):
 

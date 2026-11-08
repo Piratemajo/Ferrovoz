@@ -101,6 +101,8 @@ dependencies {
 
     // Desde 26.x Paper publica su API como "<versión>.build.<n>"; el + coge la última.
     bukkitCompileOnly "io.papermc.paper:paper-api:${project.paper_api_version}.build.+"
+    // Para filtrar el log de la consola (Paper ya lo trae).
+    bukkitCompileOnly "org.apache.logging.log4j:log4j-core:2.22.1"
 
     // Solo las API, sin transitivas (el resto lo pone el loader en tiempo de ejecución).
     neoforgeCompileOnly("net.neoforged:neoforge:${project.neoforge_version}:universal") { transitive = false }

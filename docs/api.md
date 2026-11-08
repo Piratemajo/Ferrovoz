@@ -110,7 +110,7 @@ team.members();                     // the ones online now
 team.delete();
 ```
 
-Names are case-insensitive, up to 24 characters long and can't contain `|`. Failures throw `VoiceGroupException`; `reason()` says why.
+Names are case-insensitive, up to 24 characters long and can't contain `|` or `§`. Failures throw `VoiceGroupException`; `reason()` says why.
 
 ## Events
 

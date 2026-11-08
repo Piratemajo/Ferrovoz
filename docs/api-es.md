@@ -106,7 +106,7 @@ team.members();                     // los conectados ahora
 team.delete();
 ```
 
-Los nombres no distinguen mayúsculas, tienen hasta 24 caracteres y no pueden llevar `|`. Si algo falla se lanza `VoiceGroupException`, con `reason()` para saber por qué.
+Los nombres no distinguen mayúsculas, tienen hasta 24 caracteres y no pueden llevar `|` ni `§`. Si algo falla se lanza `VoiceGroupException`, con `reason()` para saber por qué.
 
 ## Eventos
 

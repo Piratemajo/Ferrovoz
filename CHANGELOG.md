@@ -5,6 +5,11 @@ sección de esa versión como notas de la release.
 
 ## [Sin publicar]
 
+- **Contraseñas de grupo protegidas**: ya no se guardan tal cual ni en memoria ni en `ferrovoz-data.txt`, sino como PBKDF2-HMAC-SHA256 con una sal por grupo. Las de versiones anteriores se convierten solas al arrancar. En Paper, además, la contraseña de `/voz grupo crear|unirse` ya no queda en el log de la consola: se escribe tapada.
+- **Aviso al borrar un grupo**: sus miembros reciben un mensaje en su idioma (antes se quedaban sin grupo sin saber por qué).
+- **Los nombres de grupo no pueden llevar `§`**, que servía para meter colores o romper el formato de los mensajes del chat.
+- **Guardar no frena la voz**: `ferrovoz-data.txt` se escribe en un hilo propio en vez de con el estado del relé bloqueado (en un disco lento, la voz de todos se paraba un momento al guardar). Al apagar se escribe lo pendiente.
+- **Un fallo no tira la voz entera**: si un paquete raro o un error hace fallar a un hilo del relé, se descarta ese paquete y los demás hilos siguen; antes, el lock quedaba envenenado y se caía la voz de todo el servidor.
 - **Relé en varios hilos**: recibe con varios hilos a la vez (la mitad de los núcleos, hasta 4) y descifra fuera del candado del estado; la copia de la trama para cada oyente se hace en los hilos que cifran y envían. Con 4 núcleos o más da abasto con más gente hablando a la vez. Incluso con 2 núcleos (un hilo de cada) cada paquete cuesta un 15-20 % menos: el caso extremo de 100 personas juntas hablando todas pasa del 89 % al 100 % de voz entregada con menos CPU. Sin cambios para los jugadores ni el protocolo.
 
 ## [0.12.0]

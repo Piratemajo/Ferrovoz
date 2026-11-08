@@ -20,12 +20,14 @@ use crate::protocol::{
 };
 use crate::channels::{self, Channel, Target};
 use crate::crowd::{self, Cell};
+use crate::password::PasswordHash;
+use crate::sync::lock;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io;
 use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 
 use crate::fanout::{Body, Pool, SealJob};
@@ -131,6 +133,8 @@ pub enum EventKind {
     NewOwner,
     /// `player` es quien lo borró, o todo ceros si fue un plugin.
     Deleted,
+    /// Han borrado el grupo de `player` (uno por miembro, salvo quien lo borró).
+    Dissolved,
     /// Primer Hello: ya le llega la voz.
     Connected,
     /// Ha dejado la voz (Bye o salió del servidor).
@@ -150,6 +154,7 @@ impl EventKind {
             Self::Rejoined => "rejoin",
             Self::NewOwner => "owner",
             Self::Deleted => "delete",
+            Self::Dissolved => "dissolve",
             Self::Connected => "connect",
             Self::Disconnected => "disconnect",
             Self::StartedSpeaking => "speak",
@@ -296,7 +301,7 @@ impl Player {
 
 struct Group {
     name: String,
-    password: Option<String>,
+    password: Option<PasswordHash>,
     owner: Option<PlayerId>,
     /// Permanente: no se borra al vaciarse, se guarda en disco y recuerda a sus miembros.
     persistent: bool,
@@ -325,6 +330,8 @@ struct State {
     admin_muted: HashSet<PlayerId>,
     ranges: Ranges,
     data_file: Option<PathBuf>,
+    /// Quien escribe `data_file` (en su hilo, sin el lock).
+    saver: Arc<Saver>,
     events: VecDeque<ServerEvent>,
     /// Oclusión (hablante, oyente) calculada por Java en el servidor.
     occlusion: HashMap<(PlayerId, PlayerId), (u8, Instant)>,
@@ -364,6 +371,58 @@ pub struct VoiceServer {
     /// Los hilos que reciben (ver [`receiver_threads`]).
     threads: Vec<JoinHandle<()>>,
     crowd_thread: Option<JoinHandle<()>>,
+    saver: Arc<Saver>,
+    saver_thread: Option<JoinHandle<()>>,
+}
+
+/// Escribe el archivo de datos en su propio hilo, para que la voz no espere al disco
+/// (en un hosting con disco lento, varios ms por escritura). Si llegan varios cambios
+/// seguidos, solo se escribe el último. Al parar el relé escribe lo pendiente.
+#[derive(Default)]
+struct Saver {
+    queue: Mutex<SaveQueue>,
+    wake: Condvar,
+}
+
+#[derive(Default)]
+struct SaveQueue {
+    next: Option<(PathBuf, String)>,
+    closed: bool,
+}
+
+impl Saver {
+    fn submit(&self, path: PathBuf, text: String) {
+        lock(&self.queue).next = Some((path, text));
+        self.wake.notify_one();
+    }
+
+    fn close(&self) {
+        lock(&self.queue).closed = true;
+        self.wake.notify_one();
+    }
+
+    fn run(&self) {
+        loop {
+            let job = {
+                let mut q = lock(&self.queue);
+                loop {
+                    if let Some(job) = q.next.take() {
+                        break Some(job);
+                    }
+                    if q.closed {
+                        break None;
+                    }
+                    q = self.wake.wait(q).unwrap_or_else(std::sync::PoisonError::into_inner);
+                }
+            };
+            let Some((path, text)) = job else { return };
+            // Escritura atómica (temporal + rename): un corte a mitad no deja el archivo roto.
+            let tmp = path.with_extension("tmp");
+            if let Err(e) = std::fs::write(&tmp, text).and_then(|()| std::fs::rename(&tmp, &path)) {
+                log::error!("could not save {}: {e}", path.display());
+            }
+        }
+    }
 }
 
 /// Hilos que reciben: la mitad de los núcleos, entre 1 y 4; el resto cifra y envía
@@ -392,6 +451,11 @@ impl VoiceServer {
     pub fn start_with_receivers(bind: SocketAddr, max_distance: f32, receivers: usize) -> io::Result<Self> {
         let receivers = receivers.clamp(1, 16);
         let socket = UdpSocket::bind(bind)?;
+        let saver = Arc::new(Saver::default());
+        let saver_thread = {
+            let saver = saver.clone();
+            std::thread::Builder::new().name("ferrovoz-save".into()).spawn(move || saver.run())?
+        };
         socket.set_read_timeout(Some(Duration::from_millis(250)))?;
         let shared = Arc::new(Shared {
             socket,
@@ -402,6 +466,7 @@ impl VoiceServer {
                 admin_muted: HashSet::new(),
                 ranges: Ranges { normal: max_distance, ..Ranges::default() },
                 data_file: None,
+                saver: saver.clone(),
                 events: VecDeque::new(),
                 occlusion: HashMap::new(),
                 bad_ips: HashMap::new(),
@@ -453,7 +518,7 @@ impl VoiceServer {
         let crowd_thread = std::thread::Builder::new()
             .name("ferrovoz-crowd".into())
             .spawn(move || mixer.crowd_loop())?;
-        Ok(Self { shared, threads, crowd_thread: Some(crowd_thread) })
+        Ok(Self { shared, threads, crowd_thread: Some(crowd_thread), saver, saver_thread: Some(saver_thread) })
     }
 
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
@@ -461,7 +526,7 @@ impl VoiceServer {
     }
 
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
-        self.shared.state.lock().unwrap()
+        lock(&self.shared.state)
     }
 
     /// Ejecuta `f` con el estado y después envía lo pendiente por UDP.
@@ -486,7 +551,10 @@ impl VoiceServer {
         };
         let mut st = self.state();
         st.data_file = Some(path.to_owned());
-        st.load(&text);
+        if st.load(&text) {
+            log::info!("voice groups: protected the passwords stored in plain text by older versions");
+            st.save();
+        }
         Ok(())
     }
 
@@ -797,10 +865,16 @@ impl VoiceServer {
     /// Crea un grupo con `creator` como dueño.
     pub fn create_group(&self, creator: &PlayerId, name: &str, password: Option<&str>) -> Result<(), GroupError> {
         let name = name.trim();
-        // '|' es el separador en los mensajes hacia Java.
-        if !valid_text(name, MAX_GROUP_NAME) || name.contains('|') || password.is_some_and(|p| !p.is_empty() && !valid_text(p, MAX_PASSWORD)) {
+        // '|' es el separador en los mensajes hacia Java; '§' cambiaría colores y formato
+        // en los mensajes del chat que llevan el nombre.
+        if !valid_text(name, MAX_GROUP_NAME)
+            || name.contains(['|', '§'])
+            || password.is_some_and(|p| !p.is_empty() && !valid_text(p, MAX_PASSWORD))
+        {
             return Err(GroupError::InvalidName);
         }
+        // Cuesta unos ms: fuera del lock.
+        let password = password.filter(|p| !p.is_empty()).map(PasswordHash::new);
         self.with_state(|st, out| {
             if !st.players.contains_key(creator) {
                 return Err(GroupError::UnknownPlayer);
@@ -814,7 +888,7 @@ impl VoiceServer {
                 id,
                 Group {
                     name: name.to_owned(),
-                    password: password.filter(|p| !p.is_empty()).map(str::to_owned),
+                    password,
                     owner: Some(*creator),
                     persistent: false,
                     saved_members: HashSet::new(),
@@ -826,15 +900,28 @@ impl VoiceServer {
     }
 
     pub fn join_group(&self, player: &PlayerId, name: &str, password: Option<&str>) -> Result<(), GroupError> {
+        // La contraseña se comprueba fuera del lock (cuesta unos ms) y después se mira
+        // que el grupo siga teniendo la misma.
+        let stored = {
+            let st = self.state();
+            if !st.players.contains_key(player) {
+                return Err(GroupError::UnknownPlayer);
+            }
+            let id = st.find_group(name.trim()).ok_or(GroupError::NotFound)?;
+            st.groups[&id].password.clone()
+        };
+        if let Some(hash) = &stored {
+            if !password.is_some_and(|p| hash.verify(p)) {
+                return Err(GroupError::WrongPassword);
+            }
+        }
         self.with_state(|st, out| {
             if !st.players.contains_key(player) {
                 return Err(GroupError::UnknownPlayer);
             }
             let id = st.find_group(name.trim()).ok_or(GroupError::NotFound)?;
-            if let Some(expected) = &st.groups[&id].password {
-                if password != Some(expected.as_str()) {
-                    return Err(GroupError::WrongPassword);
-                }
+            if st.groups[&id].password != stored {
+                return Err(GroupError::WrongPassword); // lo han cambiado mientras
             }
             if st.players[player].group == Some(id) {
                 return Ok(());
@@ -899,6 +986,9 @@ impl VoiceServer {
             let real_name = st.groups[&g].name.clone();
             for m in st.members_of(g) {
                 st.set_group(&m, None, out);
+                if m != *requester {
+                    st.push_event(EventKind::Dissolved, real_name.clone(), m);
+                }
             }
             st.groups.remove(&g);
             st.save();
@@ -1071,6 +1161,11 @@ impl VoiceServer {
         if let Some(t) = self.crowd_thread.take() {
             let _ = t.join();
         }
+        // Lo último que haya cambiado queda en disco antes de volver.
+        self.saver.close();
+        if let Some(t) = self.saver_thread.take() {
+            let _ = t.join();
+        }
     }
 }
 
@@ -1206,7 +1301,8 @@ impl State {
         groups.sort_by_key(|g| g.name.to_lowercase());
         for g in groups {
             let owner = g.owner.as_ref().map(protocol::uuid_to_string).unwrap_or_else(|| "-".into());
-            s.push_str(&format!("group\t{}\t{}\t{}\n", g.name, owner, g.password.as_deref().unwrap_or("")));
+            let password = g.password.as_ref().map(PasswordHash::encode).unwrap_or_default();
+            s.push_str(&format!("group\t{}\t{}\t{}\n", g.name, owner, password));
             let mut members: Vec<String> = g.saved_members.iter().map(protocol::uuid_to_string).collect();
             members.sort();
             for m in members {
@@ -1216,7 +1312,10 @@ impl State {
         s
     }
 
-    fn load(&mut self, text: &str) {
+    /// Devuelve true si había contraseñas antiguas en claro: se han protegido y hay que
+    /// guardar.
+    fn load(&mut self, text: &str) -> bool {
+        let mut upgraded = false;
         for line in text.lines() {
             let f: Vec<&str> = line.split('\t').collect();
             match f.as_slice() {
@@ -1232,7 +1331,21 @@ impl State {
                         id,
                         Group {
                             name: (*name).to_owned(),
-                            password: (!password.is_empty()).then(|| (*password).to_owned()),
+                            password: match *password {
+                                "" => None,
+                                p if PasswordHash::is_encoded(p) => match PasswordHash::decode(p) {
+                                    Some(h) => Some(h),
+                                    None => {
+                                        log::warn!("voice group '{name}': unreadable password in the data file, group left open");
+                                        None
+                                    }
+                                },
+                                // Antes de 0.13 se guardaban en claro.
+                                p => {
+                                    upgraded = true;
+                                    Some(PasswordHash::new(p))
+                                }
+                            },
                             owner: protocol::uuid_from_str(owner),
                             persistent: true,
                             saved_members: HashSet::new(),
@@ -1247,15 +1360,13 @@ impl State {
                 _ => {}
             }
         }
+        upgraded
     }
 
-    /// Escritura atómica (temporal + rename).
+    /// Prepara el archivo aquí (en memoria, rápido) y lo escribe el hilo de [`Saver`].
     fn save(&self) {
-        let Some(path) = &self.data_file else { return };
-        let tmp = path.with_extension("tmp");
-        let result = std::fs::write(&tmp, self.serialize()).and_then(|()| std::fs::rename(&tmp, path));
-        if let Err(e) = result {
-            log::error!("could not save {}: {e}", path.display());
+        if let Some(path) = &self.data_file {
+            self.saver.submit(path.clone(), self.serialize());
         }
     }
 }
@@ -1291,10 +1402,20 @@ impl Shared {
             let started = Instant::now();
             self.stats.packets_in.fetch_add(1, Ordering::Relaxed);
             let mut out = Vec::new();
-            if self.handle(&buf[..len], Source::Udp(from), &mut out, &mut jobs).is_err() {
-                self.stats.rejected.fetch_add(1, Ordering::Relaxed);
-            } else {
-                self.send_udp(out);
+            // Un fallo con un paquete raro no se lleva el hilo por delante: se descarta.
+            let handled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                self.handle(&buf[..len], Source::Udp(from), &mut out, &mut jobs)
+            }));
+            match handled {
+                Ok(Ok(())) => self.send_udp(out),
+                Ok(Err(())) => {
+                    self.stats.rejected.fetch_add(1, Ordering::Relaxed);
+                }
+                Err(_) => {
+                    log::error!("voice relay: failed on a packet from {from}; skipped it");
+                    self.stats.rejected.fetch_add(1, Ordering::Relaxed);
+                    jobs.clear();
+                }
             }
             if !jobs.is_empty() {
                 pool.dispatch(std::mem::take(&mut jobs));
@@ -1318,18 +1439,25 @@ impl Shared {
                 next = now; // muy atrasado (máquina parada): no intentar recuperar
             }
             tick = tick.wrapping_add(1);
-            if tick.is_multiple_of(CROWD_PLAN_EVERY) {
-                self.plan_crowds();
-                self.sweep_speaking();
-                mixer.cleanup(Instant::now());
+            let step = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                if tick.is_multiple_of(CROWD_PLAN_EVERY) {
+                    self.plan_crowds();
+                    self.sweep_speaking();
+                    mixer.cleanup(Instant::now());
+                }
+                self.mix_crowds(&mut mixer, tick);
+            }));
+            if step.is_err() {
+                // Se empieza con el mezclador limpio; la voz por separado sigue igual.
+                log::error!("voice relay: crowd mixing failed; restarting it");
+                mixer = crowd::Mixer::new();
             }
-            self.mix_crowds(&mut mixer, tick);
         }
     }
 
     /// Quien lleva un rato sin sonar deja de hablar.
     fn sweep_speaking(&self) {
-        let mut st = self.state.lock().unwrap();
+        let mut st = lock(&self.state);
         let now = Instant::now();
         let quiet: Vec<PlayerId> = st
             .players
@@ -1347,7 +1475,7 @@ impl Shared {
 
     /// Envía una trama de un canal a quien le toque. false si el canal no existe.
     fn route_channel(&self, id: &PlayerId, opus: &[u8], out: &mut Outgoing, jobs: &mut Vec<SealJob>) -> bool {
-        let mut guard = self.state.lock().unwrap();
+        let mut guard = lock(&self.state);
         let st = &mut *guard;
         let Some(channel) = st.channels.get_mut(id) else { return false };
         channel.seq = channel.seq.wrapping_add(1);
@@ -1431,7 +1559,7 @@ impl Shared {
     /// Para cada zona con oyentes, si le llegan más de `max_voices` voces, cuáles
     /// van por separado.
     fn plan_crowds(&self) {
-        let mut st = self.state.lock().unwrap();
+        let mut st = lock(&self.state);
         if st.max_voices == 0 {
             st.crowd_plans.clear();
             return;
@@ -1470,7 +1598,7 @@ impl Shared {
         // 1. Con el lock, solo copiar lo necesario.
         let now = Instant::now();
         let (frames, cells) = {
-            let mut st = self.state.lock().unwrap();
+            let mut st = lock(&self.state);
             if st.crowd_plans.is_empty() && st.crowd_stash.is_empty() {
                 return;
             }
@@ -1496,7 +1624,7 @@ impl Shared {
         // 3. Con el lock: cifrar para cada oyente de esas zonas y enviar.
         let mut out = Vec::new();
         {
-            let mut st = self.state.lock().unwrap();
+            let mut st = lock(&self.state);
             let rules = st.role_rules;
             let range = st.ranges.normal;
             for p in st.players.values_mut() {
@@ -1534,7 +1662,7 @@ impl Shared {
     }
 
     fn broadcast_peer_states(&self, out: &mut Outgoing) {
-        let mut st = self.state.lock().unwrap();
+        let mut st = lock(&self.state);
         let st = &mut *st;
         let entries: Vec<(PlayerId, u8)> = st
             .players
@@ -1592,7 +1720,7 @@ impl Shared {
 
         // 1. Comprobaciones baratas.
         let (raw, sender_id, key, counter) = {
-            let mut guard = self.state.lock().unwrap();
+            let mut guard = lock(&self.state);
             let st = &mut *guard;
             if let Source::Udp(addr) = source {
                 if st.bad_ips.get_mut(&addr.ip()).is_some_and(|b| b.is_empty()) {
@@ -1637,7 +1765,7 @@ impl Shared {
 
         // 2. Descifrar, sin lock.
         let Ok(body) = raw.open(&key) else {
-            Self::note_bad_packet(&mut self.state.lock().unwrap(), source);
+            Self::note_bad_packet(&mut lock(&self.state), source);
             return Err(());
         };
         let frame = match raw.kind {
@@ -1646,7 +1774,7 @@ impl Shared {
         };
 
         // 3. Aplicarlo.
-        let mut guard = self.state.lock().unwrap();
+        let mut guard = lock(&self.state);
         let st = &mut *guard;
         let (cave_echo, hush, underwater_effect) = (st.cave_echo, st.hush, st.underwater_effect);
         let Some(sender) = st.players.get_mut(&sender_id) else {
@@ -1931,7 +2059,8 @@ mod tests {
             assert_eq!(s.list_groups(), vec![("Piratas".to_string(), 0, true, true)], "permanente aunque se vacíe");
         }
         let text = std::fs::read_to_string(&file).unwrap();
-        assert!(text.contains("group\tPiratas\t01010101-0101-0101-0101-010101010101\tloro"), "{text}");
+        assert!(text.contains("group\tPiratas\t01010101-0101-0101-0101-010101010101\tpbkdf2-sha256$"), "{text}");
+        assert!(!text.contains("loro"), "la contraseña no se guarda tal cual: {text}");
         // Reinicio: servidor nuevo con el mismo fichero.
         let s = server();
         s.set_data_file(&file).unwrap();
@@ -1941,10 +2070,79 @@ mod tests {
         assert_eq!(s.group_of(&b).as_deref(), Some("Piratas"), "al volver entra solo en su grupo permanente");
         assert_eq!(kinds(&s), vec![(EventKind::Rejoined, "Piratas".into())]);
         assert_eq!(s.group_owner("piratas"), Some(a), "el dueño se mantiene aunque no esté conectado");
+        s.add_player(troll);
+        assert_eq!(s.join_group(&troll, "piratas", Some("Loro")), Err(GroupError::WrongPassword));
+        assert_eq!(s.join_group(&troll, "piratas", Some("loro")), Ok(()), "la contraseña sigue valiendo tras reiniciar");
         assert_eq!(s.delete_group(&b, "piratas", false), Err(GroupError::NotOwner));
         assert_eq!(s.delete_group(&b, "piratas", true), Ok("Piratas".into()));
-        assert!(!std::fs::read_to_string(&file).unwrap().contains("Piratas"));
+        // Se escribe en segundo plano: llega al disco enseguida.
+        let start = Instant::now();
+        while std::fs::read_to_string(&file).unwrap().contains("Piratas") {
+            assert!(start.elapsed() < Duration::from_secs(5), "el borrado no llega al archivo");
+            std::thread::sleep(Duration::from_millis(10));
+        }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn plain_text_passwords_from_older_versions_are_protected_on_load() {
+        let dir = std::env::temp_dir().join(format!("ferrovoz-test-legacy-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("data.txt");
+        std::fs::write(&file, "group\tClub\t-\tvieja1234\ngroup\tAbierto\t-\t\n").unwrap();
+        {
+            let s = server();
+            s.set_data_file(&file).unwrap();
+            s.add_player([5; 16]);
+            assert_eq!(s.join_group(&[5; 16], "club", Some("mal")), Err(GroupError::WrongPassword));
+            assert_eq!(s.join_group(&[5; 16], "club", Some("vieja1234")), Ok(()));
+            assert_eq!(s.group_info("abierto").map(|i| i.1), Some(false), "sin contraseña sigue abierto");
+        }
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(!text.contains("vieja1234") && text.contains("pbkdf2-sha256$"), "{text}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn group_names_cannot_carry_chat_formatting() {
+        let s = server();
+        s.add_player([1; 16]);
+        assert_eq!(s.create_group(&[1; 16], "§cRojo", None), Err(GroupError::InvalidName));
+        assert_eq!(s.create_group(&[1; 16], "Rojo", Some("con§color")), Ok(()), "en la contraseña da igual: no se muestra");
+    }
+
+    #[test]
+    fn members_are_told_when_their_group_is_deleted() {
+        let s = server();
+        let (owner, a, b) = ([1; 16], [2; 16], [3; 16]);
+        for p in [owner, a, b] {
+            s.add_player(p);
+        }
+        s.create_group(&owner, "Club", None).unwrap();
+        s.join_group(&a, "club", None).unwrap();
+        s.join_group(&b, "club", None).unwrap();
+        s.poll_events();
+        s.delete_group(&owner, "club", false).unwrap();
+        let events: Vec<(EventKind, PlayerId)> = s.poll_events().into_iter().map(|e| (e.kind, e.player)).collect();
+        assert!(events.contains(&(EventKind::Dissolved, a)) && events.contains(&(EventKind::Dissolved, b)), "{events:?}");
+        assert!(!events.contains(&(EventKind::Dissolved, owner)), "quien lo borra ya lo sabe");
+        assert!(events.contains(&(EventKind::Deleted, owner)));
+    }
+
+    #[test]
+    fn a_thread_failing_with_the_lock_held_does_not_take_the_relay_down() {
+        let s = server();
+        let shared = s.shared.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = shared.state.lock().unwrap();
+            panic!("fallo a propósito con el lock cogido");
+        })
+        .join();
+        assert!(s.shared.state.is_poisoned());
+        // Todo sigue funcionando.
+        s.add_player([1; 16]);
+        s.create_group(&[1; 16], "Sigue", None).unwrap();
+        assert_eq!(s.group_of(&[1; 16]).as_deref(), Some("Sigue"));
     }
 
     #[test]

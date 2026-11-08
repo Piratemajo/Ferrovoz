@@ -21,6 +21,7 @@
 //! sube al servidor; la reparte el reenviador a los demás miembros, cifrada con la
 //! clave de cada uno y con dirección `Relay` en el nonce para no chocar con el relé.
 
+use crate::sync::lock;
 use crate::protocol::{
     self, AudioDown, AudioUp, NetGroupState, PacketType, PlayerId, PlayerKey, ReplayWindow, MAX_PACKET,
     OCCLUSION_UNKNOWN,
@@ -138,7 +139,7 @@ impl VoiceForwarder {
     }
 
     fn command(&self, c: Command) {
-        self.shared.commands.lock().unwrap().push(c);
+        lock(&self.shared.commands).push(c);
         let _ = self.waker.wake();
     }
 
@@ -211,7 +212,7 @@ impl Worker {
     }
 
     fn apply_commands(&mut self) {
-        let commands = std::mem::take(&mut *self.shared.commands.lock().unwrap());
+        let commands = std::mem::take(&mut *lock(&self.shared.commands));
         for c in commands {
             match c {
                 Command::Route { id, key, backend } => {

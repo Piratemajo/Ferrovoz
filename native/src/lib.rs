@@ -10,6 +10,8 @@ pub mod client;
 pub mod forwarder;
 pub mod codec;
 pub mod channels;
+pub mod password;
+pub mod sync;
 mod api_jni;
 pub mod crowd;
 pub mod denoise;

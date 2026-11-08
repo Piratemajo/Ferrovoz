@@ -364,6 +364,7 @@ public final class VoiceCommands {
             case "kick" -> "event.kicked_you";
             case "rejoin" -> "event.rejoined_you";
             case "owner" -> "event.owner_you";
+            case "dissolve" -> "event.deleted_you";
             default -> null;
         };
         if (toThem != null) {

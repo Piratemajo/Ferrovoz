@@ -53,6 +53,7 @@ public final class FerrovozPlugin extends JavaPlugin implements Listener {
     private final WallScheduler walls = new WallScheduler();
     private TunnelPump tunnel;
     private ApiCore api;
+    private PasswordLogFilter passwordFilter;
     private java.util.concurrent.ScheduledExecutorService events;
 
     /** Jugadores a los que ya se ha enviado la versión (una vez por conexión). */
@@ -71,6 +72,12 @@ public final class FerrovozPlugin extends JavaPlugin implements Listener {
             return t;
         });
         Bukkit.getPluginManager().registerEvents(this, this);
+        // Que las contraseñas de /voz grupo no queden en latest.log.
+        try {
+            passwordFilter = PasswordLogFilter.install(getLogger());
+        } catch (Throwable e) { // sin log4j: no debería pasar en Paper ni en Spigot
+            getLogger().warning("Could not hide group passwords from the console log: " + e);
+        }
         // /voz responde aunque el relé no esté en marcha.
         BukkitVoiceCommands handler = new BukkitVoiceCommands(() -> server, () -> config, online);
         PluginCommand voz = getCommand("voz");
@@ -170,6 +177,7 @@ public final class FerrovozPlugin extends JavaPlugin implements Listener {
     @Override
     public void onDisable() {
         // Las tareas las cancela el servidor al deshabilitar.
+        if (passwordFilter != null) passwordFilter.deactivate();
         if (tunnel != null) tunnel.close();
         if (events != null) events.shutdownNow();
         if (api != null) {

@@ -8,6 +8,7 @@
 //! El orden entre oyentes distintos da igual, y para un mismo oyente el jitter
 //! buffer y la ventana anti-replay toleran desorden.
 
+use crate::sync::lock;
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
@@ -128,7 +129,7 @@ pub fn cores() -> usize {
 
 fn worker(socket: &UdpSocket, rx: &Mutex<Receiver<Vec<SealJob>>>, on_sent: &(dyn Fn(usize, u64) + Send + Sync)) {
     loop {
-        let batch = match rx.lock().unwrap().recv() {
+        let batch = match lock(rx).recv() {
             Ok(b) => b,
             Err(_) => return, // el relé se ha parado
         };

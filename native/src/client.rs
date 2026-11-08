@@ -11,6 +11,7 @@
 //! `poll_tunnel`, entran por `handle_tunnel` y Java los lleva por la conexión del juego.
 //! `start_local` arranca sin red (prueba de micro en la pantalla de ajustes).
 
+use crate::sync::lock;
 use crate::codec::{VoiceDecoder, VoiceEncoder};
 use crate::denoise::Denoiser;
 use crate::micproc::MicProcessor;
@@ -490,7 +491,7 @@ impl VoiceClient {
     pub fn set_monitor(&self, v: bool) {
         self.shared.monitor.store(v, Ordering::Relaxed);
         if !v {
-            self.shared.mixer.lock().unwrap().monitor.clear();
+            lock(&self.shared.mixer).monitor.clear();
         }
     }
     pub fn set_noise_suppression(&self, v: bool) {
@@ -520,11 +521,11 @@ impl VoiceClient {
     }
     /// Alcance por defecto, para paquetes que no lo traen.
     pub fn set_max_distance(&self, d: f32) {
-        self.shared.mixer.lock().unwrap().params.max_distance = d.max(1.0);
+        lock(&self.shared.mixer).params.max_distance = d.max(1.0);
     }
     /// Volumen por jugador (0.0 a 2.0).
     pub fn set_player_volume(&self, id: PlayerId, v: f32) {
-        let mut m = self.shared.mixer.lock().unwrap();
+        let mut m = lock(&self.shared.mixer);
         let v = v.clamp(0.0, 2.0);
         if (v - 1.0).abs() < 1e-3 {
             m.player_volume.remove(&id);
@@ -535,7 +536,7 @@ impl VoiceClient {
     /// Oclusión de un jugador (0..1), calculada por Java.
     /// Camino alternativo para `id`, o `None` si no hay o la línea recta está libre.
     pub fn set_sound_path(&self, id: PlayerId, path: Option<SoundPath>) {
-        let mut m = self.shared.mixer.lock().unwrap();
+        let mut m = lock(&self.shared.mixer);
         match path {
             Some(p) if p.length.is_finite() && p.length > 0.0 => {
                 m.paths.insert(id, (p, Instant::now()));
@@ -550,7 +551,7 @@ impl VoiceClient {
     /// absorción de agudos `damp` y reflexiones tempranas.
     pub fn set_acoustics(&self, wet: f32, room: f32, damp: f32, reflections: Vec<Reflection>) {
         self.set_environment(wet, room);
-        let mut m = self.shared.mixer.lock().unwrap();
+        let mut m = lock(&self.shared.mixer);
         m.acoustics = Acoustics {
             damp: damp.clamp(0.0, 1.0),
             reflections: limit_early_energy(reflections.into_iter().take(crate::reverb::MAX_REFLECTIONS).collect()),
@@ -558,7 +559,7 @@ impl VoiceClient {
     }
 
     pub fn set_occlusion(&self, id: PlayerId, amount: f32) {
-        let mut m = self.shared.mixer.lock().unwrap();
+        let mut m = lock(&self.shared.mixer);
         if amount <= 0.001 {
             m.occlusion.remove(&id);
         } else {
@@ -569,7 +570,7 @@ impl VoiceClient {
     pub fn set_environment(&self, wet: f32, room: f32) {
         let env = Environment::from_f32(wet, room);
         self.shared.my_env.store(((env.wet as u32) << 8) | env.room as u32, Ordering::Relaxed);
-        self.shared.mixer.lock().unwrap().listener_env = (wet.clamp(0.0, 1.0), room.clamp(0.0, 1.0));
+        lock(&self.shared.mixer).listener_env = (wet.clamp(0.0, 1.0), room.clamp(0.0, 1.0));
     }
 
     /// Reverb en cuevas y salas (por defecto activada).
@@ -594,7 +595,7 @@ impl VoiceClient {
 
     /// AEC y AGC del micro.
     pub fn set_mic_processing(&self, echo_cancel: bool, auto_gain: bool) {
-        self.shared.mic_proc.lock().unwrap().configure(echo_cancel, auto_gain);
+        lock(&self.shared.mic_proc).configure(echo_cancel, auto_gain);
     }
 
     /// Avisa al servidor de que se deja la voz para que deje de enviar audio.
@@ -613,7 +614,7 @@ impl VoiceClient {
 
     /// Grupo actual (nombre vacío = ninguno).
     pub fn group_state(&self) -> GroupState {
-        self.shared.group.lock().unwrap().clone()
+        lock(&self.shared.group).clone()
     }
 
     /// Volumen de la voz de grupo.
@@ -625,7 +626,7 @@ impl VoiceClient {
     /// `None` si el servidor no lo envía.
     pub fn peer_states(&self) -> Option<Vec<(PlayerId, u8)>> {
         let now = Instant::now();
-        self.shared.peers.lock().unwrap().as_ref().map(|m| {
+        lock(&self.shared.peers).as_ref().map(|m| {
             m.iter().filter(|(_, (_, t))| now.duration_since(*t) < PEER_STATE_TTL).map(|(id, (f, _))| (*id, *f)).collect()
         })
     }
@@ -636,13 +637,13 @@ impl VoiceClient {
     pub fn set_recording(&self, on: bool) {
         self.shared.recording.store(on, Ordering::Relaxed);
         if !on {
-            self.shared.recorded.lock().unwrap().clear();
+            lock(&self.shared.recorded).clear();
         }
     }
 
     /// Tramas grabadas desde la última llamada (cuerpos de `AudioDown`).
     pub fn poll_recorded(&self) -> Vec<Vec<u8>> {
-        self.shared.recorded.lock().unwrap().drain(..).collect()
+        lock(&self.shared.recorded).drain(..).collect()
     }
 
     /// Reproduce una trama grabada como si llegara por la red.
@@ -659,18 +660,18 @@ impl VoiceClient {
     /// Posición de `id` relativa a la cámara de la repetición.
     pub fn set_source_position(&self, id: PlayerId, rel: [f32; 3]) {
         if rel.iter().all(|v| v.is_finite()) {
-            self.shared.mixer.lock().unwrap().positions.insert(id, (rel, Instant::now()));
+            lock(&self.shared.mixer).positions.insert(id, (rel, Instant::now()));
         }
     }
 
     /// Grupo de red (nombre vacío = ninguno).
     pub fn net_group(&self) -> NetGroupState {
-        self.shared.net_group.lock().unwrap().clone()
+        lock(&self.shared.net_group).clone()
     }
 
     /// Cambia de dispositivo en caliente. Cadena vacía = predeterminado.
     pub fn set_devices(&self, input: &str, output: &str) {
-        let mut d = self.shared.devices.lock().unwrap();
+        let mut d = lock(&self.shared.devices);
         let new = DeviceSelection { input: input.to_owned(), output: output.to_owned() };
         if *d != new {
             *d = new;
@@ -687,7 +688,7 @@ impl VoiceClient {
 
     /// Paquetes pendientes de enviar por la conexión del juego.
     pub fn poll_tunnel(&self) -> Vec<Vec<u8>> {
-        self.shared.net.lock().unwrap().tunnel_out.drain(..).collect()
+        lock(&self.shared.net).tunnel_out.drain(..).collect()
     }
 
     // Estado para la UI
@@ -716,7 +717,7 @@ impl VoiceClient {
             rtt_ms: self.shared.rtt_ms.load(Ordering::Relaxed),
             loss_percent: self.shared.loss_percent.load(Ordering::Relaxed) as u8,
             bitrate: self.shared.target_bitrate.load(Ordering::Relaxed),
-            tunnel: self.shared.net.lock().unwrap().tunnel_active,
+            tunnel: lock(&self.shared.net).tunnel_active,
         }
     }
     /// Jugadores que están hablando ahora, y si es por grupo.
@@ -786,7 +787,7 @@ impl Shared {
 
     #[cfg_attr(not(feature = "audio"), allow(dead_code))]
     pub(crate) fn devices(&self) -> DeviceSelection {
-        self.devices.lock().unwrap().clone()
+        lock(&self.devices).clone()
     }
 
     fn mode(&self) -> TransmitMode {
@@ -805,7 +806,7 @@ impl Shared {
 
     /// Envía por el transporte activo.
     fn send(&self, pkt: Vec<u8>) {
-        let mut net = self.net.lock().unwrap();
+        let mut net = lock(&self.net);
         if net.tunnel_active {
             if net.tunnel_out.len() >= TUNNEL_QUEUE_MAX {
                 net.tunnel_out.pop_front();
@@ -835,7 +836,7 @@ impl Shared {
             }
             {
                 // Sin respuesta por UDP: túnel, si se permite.
-                let mut net = self.net.lock().unwrap();
+                let mut net = lock(&self.net);
                 if !connected
                     && !net.tunnel_active
                     && net.policy == TransportPolicy::Auto
@@ -850,7 +851,7 @@ impl Shared {
             let interval = if connected { Duration::from_secs(2) } else { Duration::from_millis(500) };
             if last.elapsed() >= interval {
                 let kind = if connected { PacketType::Ping } else { PacketType::Hello };
-                self.net.lock().unwrap().ping_sent = Some(Instant::now());
+                lock(&self.net).ping_sent = Some(Instant::now());
                 self.send(self.seal(kind, &[]));
                 last = Instant::now();
             }
@@ -872,7 +873,7 @@ impl Shared {
         let Ok(raw) = protocol::parse(data) else { return };
         // Anti-replay.
         let Ok(body) = ({
-            let mut net = self.net.lock().unwrap();
+            let mut net = lock(&self.net);
             // Los paquetes del proxy llevan su propio contador.
             let window = if raw.kind.direction() == protocol::Direction::Relay {
                 &mut net.relay_window
@@ -886,7 +887,7 @@ impl Shared {
         match raw.kind {
             PacketType::Pong => {
                 self.connected.store(true, Ordering::Relaxed);
-                if let Some(sent) = self.net.lock().unwrap().ping_sent.take() {
+                if let Some(sent) = lock(&self.net).ping_sent.take() {
                     self.rtt_ms.store(sent.elapsed().as_millis().min(10_000) as u32, Ordering::Relaxed);
                 }
                 // Ajuste de bitrate y FEC según la pérdida.
@@ -899,13 +900,13 @@ impl Shared {
             }
             PacketType::GroupState => {
                 if let Ok(g) = GroupState::decode(&body) {
-                    *self.group.lock().unwrap() = g;
+                    *lock(&self.group) = g;
                 }
             }
             PacketType::PeerStates => {
                 if let Ok(states) = PeerStates::decode(&body) {
                     let now = Instant::now();
-                    let mut peers = self.peers.lock().unwrap();
+                    let mut peers = lock(&self.peers);
                     let map = peers.get_or_insert_with(HashMap::new);
                     map.retain(|_, (_, t)| now.duration_since(*t) < PEER_STATE_TTL);
                     for (id, flags) in states.entries {
@@ -915,7 +916,7 @@ impl Shared {
             }
             PacketType::RelayGroup => {
                 if let Ok(g) = NetGroupState::decode(&body) {
-                    *self.net_group.lock().unwrap() = g;
+                    *lock(&self.net_group) = g;
                 }
             }
             PacketType::AudioDown | PacketType::RelayAudio => {
@@ -931,7 +932,7 @@ impl Shared {
     /// Guarda la trama si hay grabación activa.
     fn record(&self, audio_down: &[u8]) {
         if self.recording.load(Ordering::Relaxed) {
-            let mut q = self.recorded.lock().unwrap();
+            let mut q = lock(&self.recorded);
             if q.len() >= RECORDED_MAX {
                 q.pop_front();
             }
@@ -941,7 +942,7 @@ impl Shared {
 
     /// Trama recibida: al búfer de su hablante.
     fn play_audio_down(&self, frame: AudioDown) {
-        let mut mixer = self.mixer.lock().unwrap();
+        let mut mixer = lock(&self.mixer);
         let speaker = match mixer.speakers.entry(frame.sender) {
             std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
             std::collections::hash_map::Entry::Vacant(e) => match VoiceDecoder::new() {
@@ -979,7 +980,7 @@ impl Shared {
 
     pub(crate) fn push_capture(&self, input: &[f32]) {
         let gain = self.mic_gain.get();
-        let mut cap = self.capture.lock().unwrap();
+        let mut cap = lock(&self.capture);
         if input.iter().all(|&s| s == 0.0) {
             cap.zero_run = cap.zero_run.saturating_add(input.len());
         } else {
@@ -998,7 +999,7 @@ impl Shared {
     fn process_frame(&self, cap: &mut CaptureState) {
         // AEC -> RNNoise -> AGC. La ganancia va al final para no amplificar el ruido que
         // se cuela (con cascos, el sonido del juego).
-        self.mic_proc.lock().unwrap().cancel_echo(&mut cap.frame);
+        lock(&self.mic_proc).cancel_echo(&mut cap.frame);
         let (prob, open) = if self.denoise.load(Ordering::Relaxed) {
             let CaptureState { denoiser, frame, .. } = cap;
             let p = denoiser.process(frame);
@@ -1006,13 +1007,13 @@ impl Shared {
         } else {
             (None, 1.0)
         };
-        self.mic_proc.lock().unwrap().adjust_gain(&mut cap.frame, prob, open);
+        lock(&self.mic_proc).adjust_gain(&mut cap.frame, prob, open);
 
         let rms = (cap.frame.iter().map(|s| s * s).sum::<f32>() / FRAME_SAMPLES as f32).sqrt();
         self.mic_level.set(rms);
 
         if self.monitor.load(Ordering::Relaxed) {
-            let mut mixer = self.mixer.lock().unwrap();
+            let mut mixer = lock(&self.mixer);
             mixer.monitor.extend(cap.frame.iter().copied());
             let excess = mixer.monitor.len().saturating_sub(MONITOR_MAX);
             mixer.monitor.drain(..excess);
@@ -1038,7 +1039,7 @@ impl Shared {
 
         // Voz propia hacia la reverb (solo la parte húmeda).
         if send && self.cave_echo_on() {
-            let mut mixer = self.mixer.lock().unwrap();
+            let mut mixer = lock(&self.mixer);
             if mixer.listener_env.0 > 0.0 {
                 mixer.self_echo.extend(cap.frame.iter().copied());
                 let excess = mixer.self_echo.len().saturating_sub(MONITOR_MAX);
@@ -1067,13 +1068,13 @@ impl Shared {
         if let Ok(opus) = encoder.encode(frame).map(|b| b.to_vec()) {
             if self.recording.load(Ordering::Relaxed) {
                 // La voz propia también se graba, en la posición del jugador.
-                let normal = self.mixer.lock().unwrap().params.max_distance;
+                let normal = lock(&self.mixer).params.max_distance;
                 let range = match talk {
                     TalkMode::Whisper => normal / 6.0,
                     TalkMode::Shout => normal * 2.0,
                     TalkMode::Normal => normal,
                 };
-                let group = !self.group.lock().unwrap().name.is_empty() || !self.net_group.lock().unwrap().name.is_empty();
+                let group = !lock(&self.group).name.is_empty() || !lock(&self.net_group).name.is_empty();
                 let mine = AudioDown {
                     sender: self.id,
                     seq,
@@ -1093,7 +1094,7 @@ impl Shared {
     }
 
     pub(crate) fn render(&self, out: &mut [f32]) {
-        let mut mixer = self.mixer.lock().unwrap();
+        let mut mixer = lock(&self.mixer);
         while mixer.ready.len() < out.len() {
             self.mix_frame(&mut mixer);
         }
@@ -1319,7 +1320,7 @@ impl Shared {
 
         // Limitador suave.
         mixer.ready.extend(mix.iter().map(|s| s.tanh()));
-        self.mic_proc.lock().unwrap().render(&reference);
+        lock(&self.mic_proc).render(&reference);
     }
 }
 
@@ -1591,7 +1592,7 @@ mod tests {
         for _ in 0..100 {
             c.push_capture(&tone(FRAME_SAMPLES, 300.0));
         }
-        assert!(c.shared.mixer.lock().unwrap().monitor.len() <= MONITOR_MAX);
+        assert!(lock(&c.shared.mixer).monitor.len() <= MONITOR_MAX);
     }
 
     #[test]
@@ -1612,7 +1613,7 @@ mod tests {
         assert_eq!(energy(&feed(&c, a, [0.0, 0.0, 2.0], false, 300.0, 20)), 0.0);
         assert!(energy(&feed(&c, b, [0.0, 0.0, 2.0], false, 300.0, 20)) > 10.0);
         c.set_player_volume(a, 1.0);
-        assert!(c.shared.mixer.lock().unwrap().player_volume.is_empty(), "volver a 100 % no deja basura");
+        assert!(lock(&c.shared.mixer).player_volume.is_empty(), "volver a 100 % no deja basura");
     }
 
     #[test]

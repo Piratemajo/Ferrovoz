@@ -13,7 +13,7 @@ public interface VoiceGroups {
 
     /**
      * Creates a temporary group with {@code owner} in it, who must have Ferrovoz. The name
-     * is up to 24 characters with no {@code |}; the password up to 32, or null.
+     * is up to 24 characters with no {@code |} or {@code §}; the password up to 32, or null.
      * Does not fire {@code GroupCreateEvent}.
      *
      * @throws VoiceGroupException if the name is invalid or taken, or the player isn't there

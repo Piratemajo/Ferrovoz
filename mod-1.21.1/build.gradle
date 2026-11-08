@@ -94,7 +94,7 @@ repositories {
 def SHARED_MAIN = [
         'FerrovozConfig', 'FerrovozLog', 'FerrovozNative', 'Messages', 'Protocol', 'SetupMessage',
         'SoundGeometry', 'TunnelPump', 'VoiceCommands', 'WallScheduler', 'WallTracer',
-        'ApiCore', 'ApiAudio', 'VoiceEventBus',
+        'ApiCore', 'ApiAudio', 'VoiceEventBus', 'CommandRedaction',
 ].collect { "dev/ferrovoz/${it}.java".toString() }
 def SHARED_CLIENT = [
         'ClientConfig', 'ReplayAudioOut', 'ReplayCompat', 'VoiceSlider',
@@ -162,6 +162,8 @@ dependencies {
     modImplementation include("me.lucko:fabric-permissions-api:${project.fabric_permissions_api_version}")
 
     bukkitCompileOnly "io.papermc.paper:paper-api:${project.paper_api_version}"
+    // Para filtrar el log de la consola (Paper ya lo trae).
+    bukkitCompileOnly "org.apache.logging.log4j:log4j-core:2.22.1"
 
     neoforgeCompileOnly("net.neoforged:neoforge:${project.neoforge_version}:universal") { transitive = false }
     neoforgeCompileOnly("net.neoforged.fancymodloader:loader:${project.neoforge_fml_version}") { transitive = false }

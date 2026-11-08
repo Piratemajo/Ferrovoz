@@ -96,6 +96,7 @@ public final class ApiSelfTest {
             System.exit(2);
         }
         eventBus();
+        redaction();
         wav();
         microphoneFormat();
         codec();
@@ -129,6 +130,22 @@ public final class ApiSelfTest {
         // Suscribirse desde dentro de un suscriptor no rompe la vuelta en curso.
         bus.subscribe(Ping.class, e -> bus.subscribe(Ping.class, x -> {}));
         bus.post(new Ping(3));
+    }
+
+    // --- Contraseñas en el log de la consola ---
+
+    private static void redaction() {
+        String prefix = "[12:00:00 INFO]: Pepe issued server command: ";
+        check(CommandRedaction.redact(prefix + "/voz grupo unirse amigos 1234").equals(prefix + "/voz grupo unirse amigos [hidden]"),
+                "unirse con contraseña: " + CommandRedaction.redact(prefix + "/voz grupo unirse amigos 1234"));
+        check(CommandRedaction.redact(prefix + "/VOICE Group CREATE Team s3cr3t extra").equals(prefix + "/VOICE Group CREATE Team [hidden]"),
+                "alias en inglés y mayúsculas");
+        check(CommandRedaction.redact(prefix + "/ferrovoz:voz grupo crear x y") != null, "con espacio de nombres");
+        check(CommandRedaction.redact(prefix + "/voz grupo unirse amigos") == null, "sin contraseña no se toca");
+        check(CommandRedaction.redact(prefix + "/voz grupo unirse amigos [hidden]") == null, "ya tapada no se vuelve a tapar");
+        check(CommandRedaction.redact(prefix + "/voz grupo salir") == null, "otros comandos no se tocan");
+        check(CommandRedaction.redact(prefix + "/tell Pepe /voz grupo unirse a b") == null, "no es el comando de voz");
+        check(CommandRedaction.redact(null) == null && CommandRedaction.redact("hola") == null, "líneas cualquiera");
     }
 
     // --- WAV ---

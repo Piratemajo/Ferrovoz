@@ -299,7 +299,7 @@ public final class FerrovozNative {
     public static native long[] serverGroupMembers(long handle, String name);
     /**
      * {@code ["tipo|uuid|detalle", ...]}, en orden. Tipos: join, leave, kick, rejoin, owner,
-     * delete (detalle = grupo), connect, disconnect, silent y speak (detalle = normal,
+     * delete, dissolve (detalle = grupo), connect, disconnect, silent y speak (detalle = normal,
      * whisper, shout o group).
      */
     public static native String[] serverPollEvents(long handle);
