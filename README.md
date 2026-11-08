@@ -116,7 +116,7 @@ Java solo hace de pegamento con el juego; captura, códec, red, cifrado, mezcla 
 Necesitas **Rust** (stable), **JDK 25** y, en Linux, `libasound2-dev` y `cmake`.
 
 ```bash
-cd native && cargo test          # 163 tests: unitarios + extremo a extremo por red (incluidos ataques)
+cd native && cargo test          # 164 tests: unitarios + extremo a extremo por red (incluidos ataques)
 cd ../mod && ./gradlew build     # compila Rust (con y sin audio) y lo mete en el .jar
 ```
 
@@ -276,6 +276,19 @@ Al terminar escribe `ferrovoz-bench/report.md` y apaga el servidor. El informe i
 
 Resultado con 100 jugadores en una plaza y 20 hablando (2 núcleos): Ferrovoz añade **0,57 ms de media al tick** (1,1 % del presupuesto), el servidor se mantiene a 20 TPS, el relé usa el 37 % de un núcleo para 74 500 paquetes/s, la memoria no cambia y llega el 99,9 % de la voz.
 
+En un servidor de 20 núcleos (Java 25, 120 s de medición por pasada, clientes en la misma máquina):
+
+| Pasada | Jugadores / hablando | TPS | Lo que Ferrovoz añade al tick (media / p99) | CPU del relé | Paquetes enviados/s | Perdidos |
+|---|---|---|---|---|---|---|
+| Servidor normal | 100 repartidos / 20 | 20,0 | 0,14 / 0,55 ms | 11 % de un núcleo | 13 100 | 0 |
+| Servidor grande | 500 repartidos / 100 | 20,0 | 0,48 / 1,37 ms | 59 % | 76 300 | 0 |
+| Evento | 250 juntos / 150 | 20,0 | 1,09 / 4,13 ms | 258 % | 308 000 | 0 |
+| Evento gigante | 500 juntos / 300 | 20,0 | 3,72 / 12,93 ms¹ | 731 % | 618 600 | 0 |
+
+En los eventos, cada jugador recibe sus 24 voces más cercanas por separado y el murmullo: 1 240 paquetes por segundo cada uno, sin ninguno rechazado ni limitado. La memoria de Java no crece.
+
+¹ Casi todo eran picos cada 4 ticks al buscar a quién calcular paredes: se recorrían todas las parejas posibles (300 × 500). Ahora solo se miran las voces que cada uno oye por separado, y esa búsqueda pasa de unos 13 ms a menos de 1 ms (medido aparte, mismo resultado).
+
 No incluye el coste propio de Minecraft por cada jugador conectado (entidades, chunks, red del juego): eso existe con o sin Ferrovoz.
 
 Para lanzarlo en tu servidor de pruebas: pon `pause-when-empty-seconds=0` en `server.properties` (si no, Minecraft deja de hacer ticks a los 60 s sin jugadores reales), arranca con `-Dferrovoz.bench=100` (opcional: `-Dferrovoz.bench.layout=crowd`, `-Dferrovoz.bench.seconds=120`, `-Dferrovoz.bench.talking=20`) y, en la misma máquina, ejecuta `cargo run --release --example bench_clients -- <carpeta del servidor>/ferrovoz-bench`. **No lo uses en un servidor con jugadores:** fuerza la carga de chunks y apaga el servidor al terminar.
@@ -297,7 +310,7 @@ El relé aislado, con clientes falsos por UDP real. Medido en una máquina de 2 
 
 La CPU es la de todos los hilos del relé juntos (recibir, cifrar y enviar, y mezclar el murmullo); 100 % = un núcleo. Sin límite, 250 personas juntas con 150 hablando piden casi 1,9 millones de paquetes por segundo: el relé no da abasto, recibe solo un tercio de la voz y entrega un 31 %. Con el límite recibe toda la voz y envía lo que debe: 24 voces y el murmullo a cada uno.
 
-Cada paquete cuesta entre 2,5 y 3 µs (descifrar, copiar para cada oyente, cifrar y enviar). El relé no bloquea el tick de Minecraft. Recibe en uno o varios hilos (la mitad de los núcleos, hasta 4), que descifran a la vez fuera del candado del estado, y reparte la copia para cada oyente, el cifrado y el envío entre hilos de ayuda (los núcleos restantes, hasta 7). Con 2 núcleos hay uno de cada; los hilos que reciben se notan a partir de 4 núcleos. En Linux envía en lotes de 64 paquetes por llamada al sistema (`sendmmsg`). Su techo crece con los núcleos: unos 400 000 paquetes por segundo por núcleo.
+Cada paquete cuesta entre 2,5 y 3 µs (descifrar, copiar para cada oyente, cifrar y enviar). El relé no bloquea el tick de Minecraft. Recibe en un hilo, que descifra fuera del candado del estado, y reparte la copia para cada oyente, el cifrado y el envío entre hilos de ayuda (uno por núcleo libre, hasta 7). Puede recibir con más hilos (`FERROVOZ_RELAY_THREADS`), pero medido en 20 núcleos con 150 personas hablando, uno basta y con cuatro se gastaba un 26 % más de CPU para lo mismo. En Linux envía en lotes de 64 paquetes por llamada al sistema (`sendmmsg`). Su techo crece con los núcleos: unos 400 000 paquetes por segundo por núcleo.
 
 Antes de la 0.9 (un solo hilo, un envío por paquete) el caso extremo se quedaba en 212 000 paquetes/s y llegaba el 43 % de la voz.
 
@@ -311,7 +324,7 @@ Ferrovoz es MIT. El jar incluye `META-INF/THIRD_PARTY_LICENSES.txt` con las lice
 cd native && cargo test --release
 ```
 
-163 tests: unitarios (audio, cifrado, jitter buffer, HRTF, reverb, AEC/AGC, mezcla de multitudes...) y de extremo a extremo con un relé real por UDP en localhost: alcances, grupos, permisos, túnel, pérdida de paquetes, ataques de replay y flood, reglas de espectadores, repeticiones, multitudes y anfitrión, voz a través del proxy y lo que usa la API (canales de audio, megáfono, silencio general, escucha del micro, eventos). La prueba de carga está en [Rendimiento](#rendimiento).
+164 tests: unitarios (audio, cifrado, jitter buffer, HRTF, reverb, AEC/AGC, mezcla de multitudes...) y de extremo a extremo con un relé real por UDP en localhost: alcances, grupos, permisos, túnel, pérdida de paquetes, ataques de replay y flood, reglas de espectadores, repeticiones, multitudes y anfitrión, voz a través del proxy y lo que usa la API (canales de audio, megáfono, silencio general, escucha del micro, eventos). La prueba de carga está en [Rendimiento](#rendimiento).
 
 La API de Java se prueba aparte contra la librería nativa real, sin Minecraft (Java 21 y Rust):
 

@@ -10,7 +10,8 @@ sección de esa versión como notas de la release.
 - **Los nombres de grupo no pueden llevar `§`**, que servía para meter colores o romper el formato de los mensajes del chat.
 - **Guardar no frena la voz**: `ferrovoz-data.txt` se escribe en un hilo propio en vez de con el estado del relé bloqueado (en un disco lento, la voz de todos se paraba un momento al guardar). Al apagar se escribe lo pendiente.
 - **Un fallo no tira la voz entera**: si un paquete raro o un error hace fallar a un hilo del relé, se descarta ese paquete y los demás hilos siguen; antes, el lock quedaba envenenado y se caía la voz de todo el servidor.
-- **Relé en varios hilos**: recibe con varios hilos a la vez (la mitad de los núcleos, hasta 4) y descifra fuera del candado del estado; la copia de la trama para cada oyente se hace en los hilos que cifran y envían. Con 4 núcleos o más da abasto con más gente hablando a la vez. Incluso con 2 núcleos (un hilo de cada) cada paquete cuesta un 15-20 % menos: el caso extremo de 100 personas juntas hablando todas pasa del 89 % al 100 % de voz entregada con menos CPU. Sin cambios para los jugadores ni el protocolo.
+- **Relé más ligero**: descifra fuera del candado del estado y prepara la copia de la trama para cada oyente en los hilos que cifran y envían. Cada paquete cuesta un 15-20 % menos: el caso extremo de 100 personas juntas hablando todas pasa del 89 % al 100 % de voz entregada con menos CPU. Sin cambios para los jugadores ni el protocolo.
+- **Paredes sin picos en eventos grandes**: para decidir a quién calcular paredes ya no se recorren todas las parejas posibles, solo las voces que cada uno oye por separado. Con 500 personas juntas y 300 hablando, esa búsqueda (cada 4 ticks) baja de unos 13 ms a menos de 1 ms.
 
 ## [0.12.0]
 
