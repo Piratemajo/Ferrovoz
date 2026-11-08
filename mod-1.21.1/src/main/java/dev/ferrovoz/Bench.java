@@ -49,6 +49,8 @@ final class Bench {
     private static final int WARMUP_SECONDS = 10;
     private static final int CONNECT_TIMEOUT_SECONDS = 180;
     private static final Path DIR = Path.of("ferrovoz-bench");
+    /** Cuántos hablan de verdad (para el informe). */
+    private static int talkers;
 
     private enum Phase { IDLE, WAIT_CLIENTS, WARMUP, MEASURE, DONE }
 
@@ -268,7 +270,6 @@ final class Bench {
     private static void registerPlayers(long s) {
         StringBuilder keys = new StringBuilder();
         keys.append("port ").append(boundPort()).append('\n');
-        int talkEvery = Math.max(1, Math.round(100f / Math.max(1, TALKING)));
         for (int i = 0; i < PLAYERS; i++) {
             double x, z;
             if (LAYOUT.equals("crowd")) {
@@ -288,7 +289,9 @@ final class Bench {
             byte[] key = FerrovozNative.serverAddPlayer(s, id.getMostSignificantBits(), id.getLeastSignificantBits());
             FerrovozNative.serverUpdatePlayer(s, id.getMostSignificantBits(), id.getLeastSignificantBits(), x, y, z, dimension, false, FerrovozNative.ROLE_ALIVE);
             FerrovozNative.serverSetPermissions(s, id.getMostSignificantBits(), id.getLeastSignificantBits(), true, true);
-            boolean talking = i % talkEvery == 0;
+            // Reparto exacto: con 60 %, 3 de cada 5 (antes "1 de cada round(100/60)" daba un 50 %).
+            boolean talking = Math.floorMod(i * TALKING, 100) < TALKING;
+            if (talking) talkers++;
             keys.append(String.format(Locale.ROOT, "%016x%016x %s %d%n",
                     id.getMostSignificantBits(), id.getLeastSignificantBits(), hex(key), talking ? 1 : 0));
         }
@@ -404,7 +407,7 @@ final class Bench {
         String r = String.format(Locale.ROOT, """
                 # Benchmark de Ferrovoz en un servidor de Fabric
 
-                %d jugadores virtuales (%s), %d %% hablando, %d s de medición. Máquina: %d núcleos, Java %s.
+                %d jugadores virtuales (%s), %d hablando (%d %%), %d s de medición. Máquina: %d núcleos, Java %s.
 
                 | | Reposo (sin voz) | Con Ferrovoz |
                 |---|---|---|
@@ -424,7 +427,7 @@ final class Bench {
                 | Memoria Java (tras GC) | %.1f MB → %.1f MB |
                 | Memoria del proceso (RSS) | %s |
                 """,
-                PLAYERS, LAYOUT, TALKING, SECONDS, cores, System.getProperty("java.version"),
+                PLAYERS, LAYOUT, talkers, TALKING, SECONDS, cores, System.getProperty("java.version"),
                 idleTicks.avgMs(), measureTicks.avgMs(),
                 idleTicks.pctMs(95), idleTicks.pctMs(99), measureTicks.pctMs(95), measureTicks.pctMs(99),
                 idleTicks.pctMs(100), measureTicks.pctMs(100),

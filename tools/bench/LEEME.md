@@ -1,12 +1,14 @@
 # Benchmark en un servidor real
 
-Mide lo que Ferrovoz cuesta a un servidor de **Fabric** de verdad: tiempo de tick, CPU del relé, memoria y voz entregada. Hace tres pasadas seguidas, de unos 3-4 minutos cada una:
+Mide lo que Ferrovoz cuesta a un servidor de **Fabric** de verdad: tiempo de tick, CPU del relé, memoria y voz entregada. Hace cinco pasadas seguidas, de unos 3-4 minutos cada una (unos 20 minutos en total):
 
 | Pasada | Jugadores | Colocación | Hablando | Para qué |
 |---|---|---|---|---|
 | `normal` | 100 | repartidos en grupos de 5 | 20 % | un servidor normal |
 | `evento` | 250 | todos juntos | 60 % | un evento grande |
 | `evento-1hilo` | 250 | todos juntos | 60 % | lo mismo con un solo hilo recibiendo, para ver cuánto aportan los demás |
+| `grande-500` | 500 | repartidos en grupos de 5 | 20 % | un servidor muy grande |
+| `evento-500` | 500 | todos juntos | 60 % | un evento gigante: hasta dónde llega |
 
 Los jugadores son virtuales: un programa aparte (`bench_clients`) hace de clientes y manda voz cifrada por UDP, como un cliente de verdad.
 

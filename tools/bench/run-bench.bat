@@ -1,7 +1,7 @@
 @echo off
 setlocal
 chcp 65001 >nul
-rem Benchmark de Ferrovoz: tres pasadas seguidas en un servidor de Fabric de pruebas.
+rem Benchmark de Ferrovoz: cinco pasadas seguidas (unos 20 minutos) en un servidor de Fabric de pruebas.
 rem Pon este archivo y bench_clients.exe en la carpeta del servidor y ejecútalo.
 rem Cada pasada carga chunks y apaga el servidor al terminar: no lo uses en el de verdad.
 
@@ -30,6 +30,8 @@ rem             nombre        jugadores  colocación  %% hablando  hilos que rec
 call :run       normal        100        spread      20           ""
 call :run       evento        250        crowd       60           ""
 call :run       evento-1hilo  250        crowd       60           1
+call :run       grande-500    500        spread      20           ""
+call :run       evento-500    500        crowd       60           ""
 
 echo.
 echo Listo. Los informes están en ferrovoz-bench-results: mándalos.

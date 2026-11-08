@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Benchmark de Ferrovoz: tres pasadas seguidas en un servidor de Fabric de pruebas.
+# Benchmark de Ferrovoz: cinco pasadas seguidas (unos 20 minutos) en un servidor de Fabric de pruebas.
 # Pon este archivo y bench_clients en la carpeta del servidor y ejecútalo con
 # `bash run-bench.sh`. Cada pasada carga chunks y apaga el servidor al terminar: no
 # lo uses en el de verdad.
@@ -39,6 +39,8 @@ run() { # nombre jugadores colocación %hablando [hilos que reciben]
 run normal       100 spread 20
 run evento       250 crowd  60
 run evento-1hilo 250 crowd  60 1
+run grande-500   500 spread 20
+run evento-500   500 crowd  60
 
 echo
 echo "Listo. Los informes están en ferrovoz-bench-results: mándalos."
