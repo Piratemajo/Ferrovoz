@@ -28,7 +28,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-use crate::fanout::{Pool, SealJob};
+use crate::fanout::{Body, Pool, SealJob};
 use crate::roles::{Role, RoleRules};
 use std::time::{Duration, Instant};
 
@@ -156,6 +156,16 @@ impl EventKind {
             Self::StoppedSpeaking => "silent",
         }
     }
+}
+
+/// Dónde está un jugador en este tick (ver [`VoiceServer::update_players`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PlayerUpdate {
+    pub id: PlayerId,
+    pub pos: [f64; 3],
+    pub dimension: i32,
+    pub underwater: bool,
+    pub role: Role,
 }
 
 /// Trama del micro de un jugador, para los plugins que escuchan la voz (API).
@@ -351,8 +361,19 @@ struct Shared {
 
 pub struct VoiceServer {
     shared: Arc<Shared>,
-    thread: Option<JoinHandle<()>>,
+    /// Los hilos que reciben (ver [`receiver_threads`]).
+    threads: Vec<JoinHandle<()>>,
     crowd_thread: Option<JoinHandle<()>>,
+}
+
+/// Hilos que reciben: la mitad de los núcleos, entre 1 y 4; el resto cifra y envía
+/// (ver [`Pool`]). Con 2 núcleos, uno de cada. `FERROVOZ_RELAY_THREADS` lo fija a mano
+/// (para pruebas).
+fn receiver_threads() -> usize {
+    if let Some(n) = std::env::var("FERROVOZ_RELAY_THREADS").ok().and_then(|v| v.trim().parse::<usize>().ok()) {
+        return n.clamp(1, 16);
+    }
+    (crate::fanout::cores() / 2).clamp(1, 4)
 }
 
 /// Paquetes UDP pendientes de enviar.
@@ -364,6 +385,12 @@ fn valid_text(s: &str, max: usize) -> bool {
 
 impl VoiceServer {
     pub fn start(bind: SocketAddr, max_distance: f32) -> io::Result<Self> {
+        Self::start_with_receivers(bind, max_distance, receiver_threads())
+    }
+
+    /// Como [`Self::start`], con un número de hilos que reciben a mano.
+    pub fn start_with_receivers(bind: SocketAddr, max_distance: f32, receivers: usize) -> io::Result<Self> {
+        let receivers = receivers.clamp(1, 16);
         let socket = UdpSocket::bind(bind)?;
         socket.set_read_timeout(Some(Duration::from_millis(250)))?;
         let shared = Arc::new(Shared {
@@ -392,15 +419,41 @@ impl VoiceServer {
             running: AtomicBool::new(true),
             stats: ServerStats::default(),
         });
-        let worker = shared.clone();
-        let thread = std::thread::Builder::new()
-            .name("ferrovoz-server".into())
-            .spawn(move || worker.run())?;
+        // Un pool de envío para todos los hilos que reciben. Vive mientras viva alguno.
+        let stats = shared.clone();
+        let on_sent: Arc<dyn Fn(usize, u64) + Send + Sync> = Arc::new(move |sent, busy| {
+            stats.stats.packets_out.fetch_add(sent as u64, Ordering::Relaxed);
+            stats.stats.busy_ns.fetch_add(busy, Ordering::Relaxed);
+        });
+        let pool = match Pool::new(&shared.socket, Pool::default_workers(receivers), on_sent.clone()) {
+            Ok(p) => p,
+            Err(e) => {
+                log::warn!("voice relay: could not start helper threads ({e}), using fewer");
+                Pool::new(&shared.socket, 0, on_sent)?
+            }
+        };
+        log::info!("voice relay: {receivers} receiving and {} sending thread(s)", pool.workers());
+        let pool = Arc::new(pool);
+        let mut threads = Vec::with_capacity(receivers);
+        for i in 0..receivers {
+            let (worker, pool) = (shared.clone(), pool.clone());
+            let name = if i == 0 { "ferrovoz-server".to_owned() } else { format!("ferrovoz-server-{i}") };
+            let spawned = std::thread::Builder::new().name(name).spawn(move || worker.run(i, &pool));
+            match spawned {
+                Ok(t) => threads.push(t),
+                Err(e) if i > 0 => {
+                    log::warn!("voice relay: could not start receiving thread {i} ({e})");
+                    break;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        drop(pool);
         let mixer = shared.clone();
         let crowd_thread = std::thread::Builder::new()
             .name("ferrovoz-crowd".into())
             .spawn(move || mixer.crowd_loop())?;
-        Ok(Self { shared, thread: Some(thread), crowd_thread: Some(crowd_thread) })
+        Ok(Self { shared, threads, crowd_thread: Some(crowd_thread) })
     }
 
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
@@ -523,6 +576,21 @@ impl VoiceServer {
             p.dimension = dimension;
             p.underwater = underwater;
             p.role = role;
+        }
+    }
+
+    /// Lo mismo que [`Self::update_player_with_role`] para muchos jugadores, cogiendo el
+    /// candado una sola vez. Java lo llama una vez por tick con todos: así el hilo del
+    /// juego no compite cientos de veces por tick con el que reenvía la voz.
+    pub fn update_players(&self, updates: &[PlayerUpdate]) {
+        let mut st = self.state();
+        for u in updates {
+            if let Some(p) = st.players.get_mut(&u.id) {
+                p.pos = u.pos;
+                p.dimension = u.dimension;
+                p.underwater = u.underwater;
+                p.role = u.role;
+            }
         }
     }
 
@@ -997,7 +1065,7 @@ impl VoiceServer {
 
     pub fn stop(&mut self) {
         self.shared.running.store(false, Ordering::SeqCst);
-        if let Some(t) = self.thread.take() {
+        for t in self.threads.drain(..) {
             let _ = t.join();
         }
         if let Some(t) = self.crowd_thread.take() {
@@ -1199,29 +1267,17 @@ enum Source {
 }
 
 impl Shared {
-    fn run(self: &Arc<Self>) {
+    /// Un hilo que recibe. Varios esperan en el mismo socket y el sistema da cada
+    /// paquete a uno; lo caro (descifrar, copiar y cifrar para cada oyente) va fuera
+    /// del lock, así que trabajan a la vez. El `index` 0 manda además los estados de
+    /// voz.
+    fn run(self: &Arc<Self>, index: usize, pool: &Pool) {
         let mut buf = [0u8; MAX_PACKET];
-        let stats = self.clone();
-        let on_sent: Arc<dyn Fn(usize, u64) + Send + Sync> = Arc::new(move |sent, busy| {
-            stats.stats.packets_out.fetch_add(sent as u64, Ordering::Relaxed);
-            stats.stats.busy_ns.fetch_add(busy, Ordering::Relaxed);
-        });
-        // Los hilos auxiliares viven lo mismo que este bucle.
-        let pool = match Pool::new(&self.socket, Pool::default_workers(), on_sent.clone()) {
-            Ok(p) => p,
-            Err(e) => {
-                log::warn!("voice relay: could not start helper threads ({e}), using one thread");
-                Pool::new(&self.socket, 0, on_sent).expect("cloning the UDP socket")
-            }
-        };
-        if pool.workers() > 0 {
-            log::info!("voice relay: {} helper thread(s) for sending voice", pool.workers());
-        }
         let mut jobs = Vec::new();
         let mut last_states = Instant::now();
         while self.running.load(Ordering::Relaxed) {
             // Estados de voz a todos, cada segundo.
-            if last_states.elapsed() >= PEER_STATES_EVERY {
+            if index == 0 && last_states.elapsed() >= PEER_STATES_EVERY {
                 last_states = Instant::now();
                 let mut out = Vec::new();
                 self.broadcast_peer_states(&mut out);
@@ -1334,7 +1390,7 @@ impl Shared {
             })
             .map(|(pid, _)| *pid)
             .collect();
-        let template = AudioDown {
+        let template = Arc::new(AudioDown {
             sender: *id,
             seq,
             rel: [0.0; 3],
@@ -1345,7 +1401,7 @@ impl Shared {
             occlusion: OCCLUSION_UNKNOWN,
             opus: opus.to_vec(),
         }
-        .encode();
+        .encode());
         for pid in recipients {
             let listener = st.players.get_mut(&pid).unwrap();
             let rel = match origin {
@@ -1356,13 +1412,14 @@ impl Shared {
                 ],
                 None => [0.0; 3],
             };
-            let body = AudioDown::for_listener(&template, rel, OCCLUSION_UNKNOWN);
             match listener.transport {
                 Transport::Udp(addr) => {
                     listener.tx_counter += 1;
+                    let body = Body::Audio { template: template.clone(), rel, occlusion: OCCLUSION_UNKNOWN };
                     jobs.push(SealJob { addr, key: listener.key, counter: listener.tx_counter, body });
                 }
                 _ => {
+                    let body = AudioDown::for_listener(&template, rel, OCCLUSION_UNKNOWN);
                     let pkt = listener.seal(PacketType::AudioDown, &body);
                     deliver(&self.stats, listener, pkt, out);
                 }
@@ -1527,61 +1584,83 @@ impl Shared {
         }
     }
 
+    /// Un paquete de un cliente. En tres pasos para que varios hilos trabajen a la vez:
+    /// bajo el lock lo barato (IP bloqueada, quién es, límite de tráfico, repetido),
+    /// fuera el descifrado, y otra vez bajo el lock marcar el contador y aplicarlo.
     fn handle(&self, data: &[u8], source: Source, out: &mut Outgoing, jobs: &mut Vec<SealJob>) -> Result<(), ()> {
-        let mut guard = self.state.lock().unwrap();
-        let st = &mut *guard;
+        let parsed = protocol::parse(data);
 
-        if let Source::Udp(addr) = source {
-            if st.bad_ips.get_mut(&addr.ip()).is_some_and(|b| b.is_empty()) {
+        // 1. Comprobaciones baratas.
+        let (raw, sender_id, key, counter) = {
+            let mut guard = self.state.lock().unwrap();
+            let st = &mut *guard;
+            if let Source::Udp(addr) = source {
+                if st.bad_ips.get_mut(&addr.ip()).is_some_and(|b| b.is_empty()) {
+                    self.stats.rate_limited.fetch_add(1, Ordering::Relaxed);
+                    return Err(());
+                }
+            }
+            let sender_id = parsed.as_ref().ok().and_then(|r| r.sender);
+            let (Ok(raw), Some(sender_id)) = (parsed, sender_id) else {
+                Self::note_bad_packet(st, source);
+                return Err(());
+            };
+            if let Source::Tunnel(owner) = source {
+                // Por el túnel solo puede hablar el dueño de esa conexión.
+                if owner != sender_id {
+                    return Err(());
+                }
+            }
+            let Some(sender) = st.players.get_mut(&sender_id) else {
+                Self::note_bad_packet(st, source);
+                return Err(());
+            };
+            // Límite por jugador antes de descifrar, que es lo caro.
+            let allowed = match raw.kind {
+                PacketType::AudioUp => sender.audio_bucket.take(),
+                _ => sender.control_bucket.take(),
+            };
+            if !allowed {
                 self.stats.rate_limited.fetch_add(1, Ordering::Relaxed);
                 return Err(());
             }
-        }
-
-        let raw = match protocol::parse(data) {
-            Ok(r) => r,
-            Err(_) => {
+            let Ok(counter) = raw.counter() else {
                 Self::note_bad_packet(st, source);
                 return Err(());
-            }
-        };
-        let Some(sender_id) = raw.sender else {
-            Self::note_bad_packet(st, source);
-            return Err(());
-        };
-        if let Source::Tunnel(owner) = source {
-            // Por el túnel solo puede hablar el dueño de esa conexión.
-            if owner != sender_id {
-                return Err(());
-            }
-        }
-        let (cave_echo, hush, underwater_effect) = (st.cave_echo, st.hush, st.underwater_effect);
-        let Some(sender) = st.players.get_mut(&sender_id) else {
-            Self::note_bad_packet(st, source);
-            return Err(());
-        };
-
-        // Límite por jugador antes de descifrar, que es lo caro.
-        let allowed = match raw.kind {
-            PacketType::AudioUp => sender.audio_bucket.take(),
-            _ => sender.control_bucket.take(),
-        };
-        if !allowed {
-            self.stats.rate_limited.fetch_add(1, Ordering::Relaxed);
-            return Err(());
-        }
-
-        let body = match raw.open_once(&sender.key, &mut sender.rx_window) {
-            Ok(b) => b,
-            Err(protocol::ProtocolError::Replay) => {
+            };
+            if !sender.rx_window.check(counter) {
                 self.stats.replayed.fetch_add(1, Ordering::Relaxed);
                 return Err(());
             }
-            Err(_) => {
-                Self::note_bad_packet(st, source);
-                return Err(());
-            }
+            (raw, sender_id, sender.key, counter)
         };
+
+        // 2. Descifrar, sin lock.
+        let Ok(body) = raw.open(&key) else {
+            Self::note_bad_packet(&mut self.state.lock().unwrap(), source);
+            return Err(());
+        };
+        let frame = match raw.kind {
+            PacketType::AudioUp => Some(AudioUp::decode(&body).map_err(|_| ())?),
+            _ => None,
+        };
+
+        // 3. Aplicarlo.
+        let mut guard = self.state.lock().unwrap();
+        let st = &mut *guard;
+        let (cave_echo, hush, underwater_effect) = (st.cave_echo, st.hush, st.underwater_effect);
+        let Some(sender) = st.players.get_mut(&sender_id) else {
+            return Err(()); // ha salido mientras
+        };
+        if sender.key != key {
+            return Err(()); // se le ha vuelto a registrar con otra clave mientras
+        }
+        // Otro hilo puede haber aceptado el mismo paquete mientras se descifraba.
+        if !sender.rx_window.check(counter) {
+            self.stats.replayed.fetch_add(1, Ordering::Relaxed);
+            return Err(());
+        }
+        sender.rx_window.mark(counter);
 
         match raw.kind {
             PacketType::Hello | PacketType::Ping => {
@@ -1620,7 +1699,7 @@ impl Shared {
                 if !from_ok {
                     return Err(());
                 }
-                let frame = AudioUp::decode(&body).map_err(|_| ())?;
+                let frame = frame.ok_or(())?;
                 sender.loss.record(frame.seq);
                 // Sin eco en el servidor, la voz sale sin el sitio del hablante: así
                 // tampoco lo oyen los clientes antiguos.
@@ -1702,7 +1781,7 @@ impl Shared {
                 let now = Instant::now();
                 // La trama se monta una vez; para cada oyente solo cambian su
                 // posición relativa y la oclusión.
-                let template = AudioDown {
+                let template = Arc::new(AudioDown {
                     sender: sender_id,
                     seq: frame.seq,
                     rel: [0.0; 3],
@@ -1713,7 +1792,7 @@ impl Shared {
                     occlusion: OCCLUSION_UNKNOWN,
                     opus: frame.opus,
                 }
-                .encode();
+                .encode());
                 for id in recipients {
                     let occlusion = match st.occlusion.get(&(sender_id, id)) {
                         Some((v, t)) if now.duration_since(*t) < OCCLUSION_TTL => *v,
@@ -1721,14 +1800,16 @@ impl Shared {
                     };
                     let listener = st.players.get_mut(&id).unwrap();
                     let rel = [src_pos[0] - listener.pos[0], src_pos[1] - listener.pos[1], src_pos[2] - listener.pos[2]];
-                    let body = AudioDown::for_listener(&template, [rel[0] as f32, rel[1] as f32, rel[2] as f32], occlusion);
+                    let rel = [rel[0] as f32, rel[1] as f32, rel[2] as f32];
                     match listener.transport {
-                        // UDP: el contador se reserva aquí y se cifra fuera del lock.
+                        // UDP: el contador se reserva aquí; la copia y el cifrado, fuera del lock.
                         Transport::Udp(addr) => {
                             listener.tx_counter += 1;
+                            let body = Body::Audio { template: template.clone(), rel, occlusion };
                             jobs.push(SealJob { addr, key: listener.key, counter: listener.tx_counter, body });
                         }
                         _ => {
+                            let body = AudioDown::for_listener(&template, rel, occlusion);
                             let pkt = listener.seal(PacketType::AudioDown, &body);
                             deliver(&self.stats, listener, pkt, out);
                         }

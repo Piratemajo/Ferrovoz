@@ -234,6 +234,53 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverUpdatePlayer(
     })
 }
 
+/// Posiciones de `count` jugadores en una llamada: `ids` = msb, lsb; `pos` = x, y, z;
+/// `info` = dimensión, flags (bit 0 bajo el agua, bits 1-2 rol). Lo que no cuadre
+/// con `count` se ignora entero.
+#[no_mangle]
+pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverUpdatePlayers(
+    env: JNIEnv,
+    _: JClass,
+    h: jlong,
+    ids: jni::objects::JLongArray,
+    pos: jni::objects::JDoubleArray,
+    info: jni::objects::JIntArray,
+    count: jint,
+) {
+    let Ok(n) = usize::try_from(count) else { return };
+    if n == 0 || n > 100_000 {
+        return;
+    }
+    fn len<T: jni::objects::TypeArray>(env: &JNIEnv, a: &jni::objects::JPrimitiveArray<T>) -> usize {
+        env.get_array_length(a).map_or(0, |l| l.max(0) as usize)
+    }
+    if ids.is_null() || pos.is_null() || info.is_null() || len(&env, &ids) < n * 2 || len(&env, &pos) < n * 3 || len(&env, &info) < n * 2 {
+        return;
+    }
+    let (mut raw_ids, mut raw_pos, mut raw_info) = (vec![0i64; n * 2], vec![0f64; n * 3], vec![0i32; n * 2]);
+    if env.get_long_array_region(&ids, 0, &mut raw_ids).is_err()
+        || env.get_double_array_region(&pos, 0, &mut raw_pos).is_err()
+        || env.get_int_array_region(&info, 0, &mut raw_info).is_err()
+    {
+        return;
+    }
+    let updates: Vec<server::PlayerUpdate> = (0..n)
+        .filter(|&i| raw_pos[i * 3..i * 3 + 3].iter().all(|v| v.is_finite()))
+        .map(|i| server::PlayerUpdate {
+            id: protocol::uuid_from_java(raw_ids[i * 2], raw_ids[i * 2 + 1]),
+            pos: [raw_pos[i * 3], raw_pos[i * 3 + 1], raw_pos[i * 3 + 2]],
+            dimension: raw_info[i * 2],
+            underwater: raw_info[i * 2 + 1] & 1 != 0,
+            role: crate::roles::Role::from_i32((raw_info[i * 2 + 1] >> 1) & 3),
+        })
+        .collect();
+    guard((), || {
+        if let Some(s) = borrow::<VoiceServer>(h) {
+            s.update_players(&updates);
+        }
+    })
+}
+
 /// Reglas de espectadores y muertos: 0 normal, 1 listen, 2 ghost, 3 own, 4 off.
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverSetRoleRules(

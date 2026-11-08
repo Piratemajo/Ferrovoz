@@ -1016,3 +1016,45 @@ fn group_voice_has_its_own_volume() {
     listener.set_volume(0.0);
     assert!(heard() > 10.0, "con el de proximidad a 0, el grupo se sigue oyendo");
 }
+
+/// Con varios hilos recibiendo, el mismo paquete repetido muchas veces a la vez solo
+/// se acepta una: dos hilos pueden descifrarlo a la vez, pero solo uno lo marca.
+#[test]
+fn a_replayed_packet_is_relayed_once_with_several_receiving_threads() {
+    use ferrovoz::protocol::{AudioUp, Environment, PacketType, TalkMode};
+    let server = VoiceServer::start_with_receivers("127.0.0.1:0".parse().unwrap(), 48.0, 4).unwrap();
+    let addr = server.local_addr().unwrap();
+    let (speaker, listener) = ([71u8; 16], [72u8; 16]);
+    let mut sockets = Vec::new();
+    for (id, x) in [(speaker, 0.0), (listener, 2.0)] {
+        let key = server.add_player(id);
+        server.update_player(&id, [x, 64.0, 0.0], OVERWORLD);
+        let sock = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        sock.send_to(&ferrovoz::protocol::seal(&key, PacketType::Hello, Some(&id), &[], 1), addr).unwrap();
+        sockets.push((sock, key));
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    let (listener_sock, _) = &sockets[1];
+    listener_sock.set_read_timeout(Some(Duration::from_millis(50))).unwrap();
+    let mut buf = [0u8; 1500];
+    while listener_sock.recv(&mut buf).is_ok() {} // Pong y estados
+
+    let (speaker_sock, key) = &sockets[0];
+    let body = AudioUp { seq: 1, talk: TalkMode::Normal, env: Environment::default(), opus: vec![0xF8; 40] }.encode();
+    let pkt = ferrovoz::protocol::seal(key, PacketType::AudioUp, Some(&speaker), &body, 2);
+    for _ in 0..200 {
+        speaker_sock.send_to(&pkt, addr).unwrap();
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    let mut voice = 0;
+    while let Ok(n) = listener_sock.recv(&mut buf) {
+        if n > 4 && buf[3] == PacketType::AudioDown as u8 {
+            voice += 1;
+        }
+    }
+    assert_eq!(voice, 1, "el paquete repetido solo se reenvía una vez");
+    // Las demás las para el anti-replay o, antes, el límite de tráfico del jugador.
+    let st = server.stats();
+    let stopped = st.replayed.load(std::sync::atomic::Ordering::Relaxed) + st.rate_limited.load(std::sync::atomic::Ordering::Relaxed);
+    assert!(stopped >= 150, "las copias se descartan: {stopped}");
+}

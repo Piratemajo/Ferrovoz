@@ -2,8 +2,8 @@
 //!
 //! Con mucha gente junta, casi todo el trabajo del relé es cifrar y enviar la misma
 //! trama a cada oyente. El hilo que recibe decide los destinos y reserva los
-//! contadores bajo el lock del estado; el cifrado y el envío se hacen fuera del
-//! lock, repartidos en el pool.
+//! contadores bajo el lock del estado; la copia de cada oyente, el cifrado y el
+//! envío se hacen fuera del lock, repartidos en el pool.
 //!
 //! El orden entre oyentes distintos da igual, y para un mismo oyente el jitter
 //! buffer y la ventana anti-replay toleran desorden.
@@ -13,19 +13,31 @@ use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-use crate::protocol::{self, PacketType, PlayerKey};
+use crate::protocol::{self, AudioDown, PacketType, PlayerKey};
 
 /// Paquete pendiente de cifrar para un oyente UDP.
 pub struct SealJob {
     pub addr: SocketAddr,
     pub key: PlayerKey,
     pub counter: u64,
-    pub body: Vec<u8>,
+    pub body: Body,
+}
+
+/// Contenido de un [`SealJob`].
+pub enum Body {
+    Ready(Vec<u8>),
+    /// Una trama de voz común a todos los oyentes y lo que cambia para este: se monta
+    /// al cifrar, fuera del lock.
+    Audio { template: Arc<Vec<u8>>, rel: [f32; 3], occlusion: u8 },
 }
 
 impl SealJob {
     fn seal(self) -> (SocketAddr, Vec<u8>) {
-        (self.addr, protocol::seal(&self.key, PacketType::AudioDown, None, &self.body, self.counter))
+        let body = match self.body {
+            Body::Ready(b) => b,
+            Body::Audio { template, rel, occlusion } => AudioDown::for_listener(&template, rel, occlusion),
+        };
+        (self.addr, protocol::seal(&self.key, PacketType::AudioDown, None, &body, self.counter))
     }
 }
 
@@ -54,10 +66,9 @@ pub struct Pool {
 }
 
 impl Pool {
-    /// Hilos auxiliares: núcleos - 1 (el otro es el que recibe), máximo 7. Con un
-    /// núcleo, ninguno.
-    pub fn default_workers() -> usize {
-        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).saturating_sub(1).min(7)
+    /// Hilos auxiliares: los núcleos que no reciben, máximo 7. Con un núcleo, ninguno.
+    pub fn default_workers(receivers: usize) -> usize {
+        cores().saturating_sub(receivers).min(7)
     }
 
     pub fn new(socket: &UdpSocket, workers: usize, on_sent: Counter) -> std::io::Result<Self> {
@@ -111,6 +122,10 @@ impl Pool {
     }
 }
 
+pub fn cores() -> usize {
+    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
+}
+
 fn worker(socket: &UdpSocket, rx: &Mutex<Receiver<Vec<SealJob>>>, on_sent: &(dyn Fn(usize, u64) + Send + Sync)) {
     loop {
         let batch = match rx.lock().unwrap().recv() {
@@ -160,7 +175,7 @@ mod tests {
         let mut jobs = Vec::new();
         for counter in 1..=50u64 {
             for l in &listeners {
-                jobs.push(SealJob { addr: l.local_addr().unwrap(), key, counter, body: counter.to_le_bytes().to_vec() });
+                jobs.push(SealJob { addr: l.local_addr().unwrap(), key, counter, body: Body::Ready(counter.to_le_bytes().to_vec()) });
             }
         }
         pool.dispatch(jobs);

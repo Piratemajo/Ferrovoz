@@ -116,7 +116,7 @@ Java solo hace de pegamento con el juego; captura, códec, red, cifrado, mezcla 
 Necesitas **Rust** (stable), **JDK 25** y, en Linux, `libasound2-dev` y `cmake`.
 
 ```bash
-cd native && cargo test          # 155 tests: unitarios + extremo a extremo por red (incluidos ataques)
+cd native && cargo test          # 156 tests: unitarios + extremo a extremo por red (incluidos ataques)
 cd ../mod && ./gradlew build     # compila Rust (con y sin audio) y lo mete en el .jar
 ```
 
@@ -288,14 +288,14 @@ El relé aislado, con clientes falsos por UDP real. Medido en una máquina de 2 
 |---|---|---|---|---|---|
 | Repartidos por el mapa | 100 | 20 | **2 %** | 4 200 | 100 % |
 | Evento, todos juntos | 50 | 10 | 8 % | 24 500 | 100 % |
-| Plaza llena | 100 | 25 | 35 % | 124 000 | 100 % |
-| Extremo: 100 juntos hablando todos a la vez | 100 | 100 | 134 % | 495 000 | 100 % |
+| Plaza llena | 100 | 25 | 36 % | 124 000 | 100 % |
+| Extremo: 100 juntos hablando todos a la vez | 100 | 100 | 131 % | 495 000 | 100 % |
 | Evento de 250, 150 hablando, **sin límite** (`max_voices=0`) | 250 | 150 | 148 % (saturado) | 577 000 | **31 %** |
 | Evento de 250, 150 hablando, **con `max_voices=24`** | 250 | 150 | 141 % | 299 000 | todas las que tocan + murmullo |
 
 La CPU es la de todos los hilos del relé juntos (recibir, cifrar y enviar, y mezclar el murmullo); 100 % = un núcleo. Sin límite, 250 personas juntas con 150 hablando piden casi 1,9 millones de paquetes por segundo: el relé no da abasto, recibe solo un tercio de la voz y entrega un 31 %. Con el límite recibe toda la voz y envía lo que debe: 24 voces y el murmullo a cada uno.
 
-Cada paquete cuesta unos 2 µs (cifrar y enviar). El relé no bloquea el tick de Minecraft: recibe en su propio hilo y reparte el cifrado y el envío entre hilos de ayuda (uno por núcleo libre, hasta 7). En Linux envía en lotes de 64 paquetes por llamada al sistema (`sendmmsg`). Su techo crece con los núcleos: unos 400 000 paquetes por segundo por núcleo.
+Cada paquete cuesta entre 2,5 y 3 µs (descifrar, copiar para cada oyente, cifrar y enviar). El relé no bloquea el tick de Minecraft. Recibe en uno o varios hilos (la mitad de los núcleos, hasta 4), que descifran a la vez fuera del candado del estado, y reparte la copia para cada oyente, el cifrado y el envío entre hilos de ayuda (los núcleos restantes, hasta 7). Con 2 núcleos hay uno de cada; los hilos que reciben se notan a partir de 4 núcleos. En Linux envía en lotes de 64 paquetes por llamada al sistema (`sendmmsg`). Su techo crece con los núcleos: unos 400 000 paquetes por segundo por núcleo.
 
 Antes de la 0.9 (un solo hilo, un envío por paquete) el caso extremo se quedaba en 212 000 paquetes/s y llegaba el 43 % de la voz.
 
@@ -309,7 +309,7 @@ Ferrovoz es MIT. El jar incluye `META-INF/THIRD_PARTY_LICENSES.txt` con las lice
 cd native && cargo test --release
 ```
 
-155 tests: unitarios (audio, cifrado, jitter buffer, HRTF, reverb, AEC/AGC, mezcla de multitudes...) y de extremo a extremo con un relé real por UDP en localhost: alcances, grupos, permisos, túnel, pérdida de paquetes, ataques de replay y flood, reglas de espectadores, repeticiones, multitudes y anfitrión, voz a través del proxy y lo que usa la API (canales de audio, megáfono, silencio general, escucha del micro, eventos). La prueba de carga está en [Rendimiento](#rendimiento).
+156 tests: unitarios (audio, cifrado, jitter buffer, HRTF, reverb, AEC/AGC, mezcla de multitudes...) y de extremo a extremo con un relé real por UDP en localhost: alcances, grupos, permisos, túnel, pérdida de paquetes, ataques de replay y flood, reglas de espectadores, repeticiones, multitudes y anfitrión, voz a través del proxy y lo que usa la API (canales de audio, megáfono, silencio general, escucha del micro, eventos). La prueba de carga está en [Rendimiento](#rendimiento).
 
 La API de Java se prueba aparte contra la librería nativa real, sin Minecraft (Java 21 y Rust):
 

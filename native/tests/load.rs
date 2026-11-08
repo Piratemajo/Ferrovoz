@@ -13,7 +13,8 @@
 
 use ferrovoz::codec::VoiceEncoder;
 use ferrovoz::protocol::{self, AudioUp, Environment, PacketType, TalkMode, FRAME_SAMPLES};
-use ferrovoz::server::VoiceServer;
+use ferrovoz::roles::Role;
+use ferrovoz::server::{PlayerUpdate, VoiceServer};
 use std::net::UdpSocket;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -41,6 +42,20 @@ struct Report {
     delivered_percent: f64,
     us_per_packet: f64,
     rss_mb: Option<f64>,
+    /// Lo que tarda el hilo del juego en mandar las posiciones de todos, por tick.
+    tick_avg_us: f64,
+    tick_max_us: f64,
+}
+
+/// Cómo manda el "juego" las posiciones cada tick (50 ms), como hace el mod.
+#[derive(Clone, Copy, PartialEq)]
+enum Ticks {
+    /// Sin hilo del juego (las pruebas de siempre).
+    Off,
+    /// Una llamada por jugador, como hasta 0.12.
+    PerPlayer,
+    /// Todas en una llamada.
+    Batched,
 }
 
 /// Tiempo de CPU (s) de los hilos del relé (recepción, envío y multitudes) según
@@ -85,6 +100,16 @@ fn run(name: &'static str, positions: Vec<[f64; 3]>, talking: impl Fn(usize) -> 
 
 /// Con `max_voices` > 0 la entrega esperada no se calcula (depende de las zonas).
 fn run_with(name: &'static str, positions: Vec<[f64; 3]>, talking: impl Fn(usize) -> bool, max_voices: usize) -> Report {
+    run_full(name, positions, talking, max_voices, Ticks::Off)
+}
+
+fn run_full(
+    name: &'static str,
+    positions: Vec<[f64; 3]>,
+    talking: impl Fn(usize) -> bool,
+    max_voices: usize,
+    ticks: Ticks,
+) -> Report {
     let stop = Arc::new(AtomicBool::new(false));
     let opus = opus_frame();
 
@@ -153,76 +178,125 @@ fn run_with(name: &'static str, positions: Vec<[f64; 3]>, talking: impl Fn(usize
     let talkers: Vec<usize> = (0..clients.len()).filter(|&i| clients[i].talking).collect();
     let expected_per_frame: u64 = talkers.iter().map(|&i| listeners_of(i)).sum();
 
-    // 1 s de calentamiento y después se mide.
-    let mut seq = 0u32;
-    let mut send_frame = |seq: &mut u32| {
-        for &i in &talkers {
-            let body = AudioUp { seq: *seq, talk: TalkMode::Normal, env: Environment::default(), opus: opus.clone() }
-                .encode();
-            let pkt = protocol::seal(&keys[i], PacketType::AudioUp, Some(&clients[i].id), &body, counters[i]);
-            counters[i] += 1;
-            let _ = clients[i].socket.send_to(&pkt, addr);
+    // El hilo del juego: cada 50 ms, todas las posiciones (moviéndose un poco).
+    let game_stop = Arc::new(AtomicBool::new(false));
+    let tick_times = Arc::new(std::sync::Mutex::new(Vec::<u64>::new()));
+    let result = std::thread::scope(|scope| {
+        if ticks != Ticks::Off {
+            let (server, game_stop, tick_times) = (&server, game_stop.clone(), tick_times.clone());
+            let base: Vec<([u8; 16], [f64; 3])> = clients.iter().map(|c| (c.id, c.pos)).collect();
+            scope.spawn(move || {
+                let mut updates: Vec<PlayerUpdate> = base
+                    .iter()
+                    .map(|(id, pos)| PlayerUpdate { id: *id, pos: *pos, dimension: 1, underwater: false, role: Role::Alive })
+                    .collect();
+                let mut n = 0u64;
+                let mut next = Instant::now();
+                while !game_stop.load(Ordering::Relaxed) {
+                    n += 1;
+                    for (u, (_, pos)) in updates.iter_mut().zip(&base) {
+                        u.pos[0] = pos[0] + ((n % 20) as f64) * 0.01; // dentro del mismo bloque
+                    }
+                    let t = Instant::now();
+                    match ticks {
+                        Ticks::PerPlayer => {
+                            for u in &updates {
+                                server.update_player_with_role(&u.id, u.pos, u.dimension, u.underwater, u.role);
+                            }
+                        }
+                        Ticks::Batched => server.update_players(&updates),
+                        Ticks::Off => {}
+                    }
+                    tick_times.lock().unwrap().push(t.elapsed().as_nanos() as u64);
+                    next += Duration::from_millis(50);
+                    std::thread::sleep(next.saturating_duration_since(Instant::now()));
+                }
+            });
         }
-        *seq += 1;
-    };
-    let warmup_end = Instant::now() + Duration::from_secs(1);
-    let mut next = Instant::now();
-    while Instant::now() < warmup_end {
-        send_frame(&mut seq);
-        next += FRAME;
-        std::thread::sleep(next.saturating_duration_since(Instant::now()));
-    }
-    std::thread::sleep(Duration::from_millis(100));
 
-    let st = server.stats();
-    let busy0 = st.busy_ns.load(Ordering::Relaxed);
-    let cpu0 = relay_cpu_seconds();
-    let in0 = st.packets_in.load(Ordering::Relaxed);
-    let out0 = st.packets_out.load(Ordering::Relaxed);
-    let recv0: u64 = clients.iter().map(|c| c.received.load(Ordering::Relaxed)).sum();
-    let t0 = Instant::now();
-    let mut frames = 0u64;
-    next = Instant::now();
-    while t0.elapsed() < MEASURE {
-        send_frame(&mut seq);
-        frames += 1;
-        next += FRAME;
-        std::thread::sleep(next.saturating_duration_since(Instant::now()));
-    }
-    // Lo último puede estar todavía en camino.
-    std::thread::sleep(Duration::from_millis(200));
-    let wall = t0.elapsed().as_secs_f64() - 0.2;
-    let busy = match (cpu0, relay_cpu_seconds()) {
-        (Some(a), Some(b)) => b - a,
-        _ => (st.busy_ns.load(Ordering::Relaxed) - busy0) as f64 / 1e9,
-    };
-    let pin = st.packets_in.load(Ordering::Relaxed) - in0;
-    let pout = st.packets_out.load(Ordering::Relaxed) - out0;
-    let recv: u64 = clients.iter().map(|c| c.received.load(Ordering::Relaxed)).sum::<u64>() - recv0;
-    let rss_after = rss_mb();
-    if std::env::var("FERROVOZ_THREADS").is_ok() {
-        for task in std::fs::read_dir("/proc/self/task").unwrap() {
-            let dir = task.unwrap().path();
-            let comm = std::fs::read_to_string(dir.join("comm")).unwrap_or_default();
-            let stat = std::fs::read_to_string(dir.join("stat")).unwrap_or_default();
-            let rest = &stat[stat.rfind(')').unwrap_or(0) + 2..];
-            let f: Vec<&str> = rest.split_whitespace().collect();
-            let t: f64 = f.get(11).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0) + f.get(12).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
-            if t > 50.0 { eprintln!("  hilo {:<18} {:.1} s", comm.trim(), t / 100.0); }
+        // 1 s de calentamiento y después se mide.
+        let mut seq = 0u32;
+        let mut send_frame = |seq: &mut u32| {
+            for &i in &talkers {
+                let body = AudioUp { seq: *seq, talk: TalkMode::Normal, env: Environment::default(), opus: opus.clone() }
+                    .encode();
+                let pkt = protocol::seal(&keys[i], PacketType::AudioUp, Some(&clients[i].id), &body, counters[i]);
+                counters[i] += 1;
+                let _ = clients[i].socket.send_to(&pkt, addr);
+            }
+            *seq += 1;
+        };
+        let warmup_end = Instant::now() + Duration::from_secs(1);
+        let mut next = Instant::now();
+        while Instant::now() < warmup_end {
+            send_frame(&mut seq);
+            next += FRAME;
+            std::thread::sleep(next.saturating_duration_since(Instant::now()));
         }
-    }
+        std::thread::sleep(Duration::from_millis(100));
 
-    stop.store(true, Ordering::Relaxed);
-    for r in receivers {
-        r.join().unwrap();
-    }
+        let st = server.stats();
+        let busy0 = st.busy_ns.load(Ordering::Relaxed);
+        let cpu0 = relay_cpu_seconds();
+        let in0 = st.packets_in.load(Ordering::Relaxed);
+        let out0 = st.packets_out.load(Ordering::Relaxed);
+        let recv0: u64 = clients.iter().map(|c| c.received.load(Ordering::Relaxed)).sum();
+        let t0 = Instant::now();
+        let mut frames = 0u64;
+        next = Instant::now();
+        while t0.elapsed() < MEASURE {
+            send_frame(&mut seq);
+            frames += 1;
+            next += FRAME;
+            std::thread::sleep(next.saturating_duration_since(Instant::now()));
+        }
+        // Lo último puede estar todavía en camino.
+        std::thread::sleep(Duration::from_millis(200));
+        game_stop.store(true, Ordering::Relaxed);
+        let wall = t0.elapsed().as_secs_f64() - 0.2;
+        let busy = match (cpu0, relay_cpu_seconds()) {
+            (Some(a), Some(b)) => b - a,
+            _ => (st.busy_ns.load(Ordering::Relaxed) - busy0) as f64 / 1e9,
+        };
+        let pin = st.packets_in.load(Ordering::Relaxed) - in0;
+        let pout = st.packets_out.load(Ordering::Relaxed) - out0;
+        let recv: u64 = clients.iter().map(|c| c.received.load(Ordering::Relaxed)).sum::<u64>() - recv0;
+        let rss_after = rss_mb();
+        if std::env::var("FERROVOZ_THREADS").is_ok() {
+            for task in std::fs::read_dir("/proc/self/task").unwrap() {
+                let dir = task.unwrap().path();
+                let comm = std::fs::read_to_string(dir.join("comm")).unwrap_or_default();
+                let stat = std::fs::read_to_string(dir.join("stat")).unwrap_or_default();
+                let rest = &stat[stat.rfind(')').unwrap_or(0) + 2..];
+                let f: Vec<&str> = rest.split_whitespace().collect();
+                let t: f64 = f.get(11).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0) + f.get(12).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
+                if t > 50.0 { eprintln!("  hilo {:<18} {:.1} s", comm.trim(), t / 100.0); }
+            }
+        }
+
+        stop.store(true, Ordering::Relaxed);
+        for r in receivers {
+            r.join().unwrap();
+        }
+        (busy, wall, pin, pout, recv, rss_before, rss_after, frames, expected_per_frame, talkers.len(), clients.len())
+    });
+    let (busy, wall, pin, pout, recv, rss_before, rss_after, frames, expected_per_frame, n_talkers, n_players) = result;
     drop(server);
+    let times = tick_times.lock().unwrap();
+    let (tick_avg_us, tick_max_us) = if times.is_empty() {
+        (0.0, 0.0)
+    } else {
+        // Sin el primer segundo (calentamiento).
+        let t = &times[times.len().min(20)..];
+        let t = if t.is_empty() { &times[..] } else { t };
+        (t.iter().sum::<u64>() as f64 / t.len() as f64 / 1e3, *t.iter().max().unwrap() as f64 / 1e3)
+    };
 
     let expected = expected_per_frame * frames;
     Report {
         name,
-        players: clients.len(),
-        talkers: talkers.len(),
+        players: n_players,
+        talkers: n_talkers,
         cpu_percent: 100.0 * busy / wall,
         in_per_s: pin as f64 / wall,
         out_per_s: pout as f64 / wall,
@@ -235,6 +309,8 @@ fn run_with(name: &'static str, positions: Vec<[f64; 3]>, talking: impl Fn(usize
         },
         us_per_packet: if pout == 0 { 0.0 } else { busy * 1e6 / (pin + pout) as f64 },
         rss_mb: rss_before.zip(rss_after).map(|(a, b)| (b - a).max(0.0)),
+        tick_avg_us,
+        tick_max_us,
     }
 }
 
@@ -267,6 +343,25 @@ fn print(r: &Report) {
         r.us_per_packet,
         r.rss_mb.map_or("n/d".to_string(), |m| format!("{m:.1} MB")),
     );
+}
+
+/// Lo que cuesta mandar las posiciones de 250 personas cada tick: una llamada por
+/// jugador (como hasta 0.12) o todas juntas, con un evento en marcha (150 hablando).
+#[test]
+#[ignore = "prueba de carga: cargo test --release --test load -- --ignored --nocapture"]
+fn position_updates_per_player_or_batched() {
+    let per = run_full("posiciones una a una", event(250), |i| i % 5 < 3, 24, Ticks::PerPlayer);
+    let batch = run_full("posiciones juntas", event(250), |i| i % 5 < 3, 24, Ticks::Batched);
+    println!();
+    println!("{:<24} {:>12} {:>12} {:>10} {:>9}", "250 jugadores", "tick medio", "tick máx", "CPU relé", "in/s");
+    for r in [&per, &batch] {
+        println!(
+            "{:<24} {:>9.1} µs {:>9.1} µs {:>8.1} % {:>9.0}",
+            r.name, r.tick_avg_us, r.tick_max_us, r.cpu_percent, r.in_per_s
+        );
+    }
+    // Sin assert: con el relé saturado, lo que se mide es sobre todo la espera por CPU
+    // y varía más entre ejecuciones que la diferencia entre las dos formas.
 }
 
 #[test]

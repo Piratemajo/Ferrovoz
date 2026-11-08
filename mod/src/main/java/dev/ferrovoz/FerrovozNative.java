@@ -138,6 +138,8 @@ public final class FerrovozNative {
      * @param underwater cabeza bajo el agua
      * @param role {@link #ROLE_ALIVE}, {@link #ROLE_SPECTATOR} o {@link #ROLE_DEAD}
      */
+    public static native void serverUpdatePlayers(long handle, long[] ids, double[] positions, int[] info, int count);
+
     public static native void serverUpdatePlayer(long handle, long uuidMsb, long uuidLsb,
                                                  double x, double y, double z, int dimension, boolean underwater, int role);
 

@@ -3,6 +3,10 @@
 Formato: una sección `## [versión]` por versión. Al publicar, el CI copia la
 sección de esa versión como notas de la release.
 
+## [Sin publicar]
+
+- **Relé en varios hilos**: recibe con varios hilos a la vez (la mitad de los núcleos, hasta 4) y descifra fuera del candado del estado; la copia de la trama para cada oyente se hace en los hilos que cifran y envían. Con 4 núcleos o más da abasto con más gente hablando a la vez. Incluso con 2 núcleos (un hilo de cada) cada paquete cuesta un 15-20 % menos: el caso extremo de 100 personas juntas hablando todas pasa del 89 % al 100 % de voz entregada con menos CPU. Sin cambios para los jugadores ni el protocolo.
+
 ## [0.12.0]
 
 - **API para plugins y mods** (`dev.ferrovoz.api`): la misma en Fabric, NeoForge, Forge y Paper/Spigot/Folia, en 26.3 y 1.21.1, y sin clases de Minecraft. Permite controlar la voz (silencio de moderación, forzar permisos, alcance propio para un megáfono o un escenario, **silencio general** en el que solo se oye a quien tiene prioridad, grupos sin contraseña, alcances, multitudes y eco en marcha), suscribirse a eventos (conectar, empezar y dejar de hablar, cambios en los grupos) y cancelar lo que piden los jugadores con `/voz` (crear un grupo, unirse, silenciar). También permite **poner sonido**: canales de audio que suenan desde un punto, siguen a un jugador o van a unos jugadores o a un grupo, con el mismo 3D que la voz, a partir de WAV, PCM u Opus. Y **escuchar la voz** de los jugadores para grabarla, transcribirla o hacer bots. El sonido de los plugins lo oyen todos los clientes, también los anteriores; estos lo muestran en la lista de quién habla. Se compila contra `ferrovoz-api-<versión>.jar`, que va en cada release. Ver [docs/api-es.md](docs/api-es.md) (en inglés: [docs/api.md](docs/api.md)). El javadoc de la API está en inglés.
