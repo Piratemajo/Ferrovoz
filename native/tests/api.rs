@@ -169,12 +169,16 @@ fn plugins_can_listen_to_the_microphone() {
     s.speak(0);
     assert!(s.server.poll_mic().is_empty(), "sin escucha no se copia nada");
 
-    s.server.set_mic_tap(true);
+    // Que lo que quede en camino de la frase anterior (en modo normal) llegue antes de
+    // escuchar: en una máquina lenta, las últimas tramas tardan en salir del cliente.
     s.clients[0].set_talk_mode(TalkMode::Shout);
+    std::thread::sleep(Duration::from_millis(500));
+    s.server.set_mic_tap(true);
     s.speak(0);
     let frames = s.server.poll_mic();
     assert!(frames.len() >= 30, "llegan las tramas: {}", frames.len());
-    assert!(frames.iter().all(|f| f.player == id(0) && f.talk == TalkMode::Shout && !f.group));
+    let odd: Vec<_> = frames.iter().filter(|f| f.player != id(0) || f.talk != TalkMode::Shout || f.group).map(|f| (f.seq, f.talk)).collect();
+    assert!(odd.is_empty(), "todas del que habla, gritando: {odd:?}");
     // Y se pueden decodificar.
     let mut dec = VoiceDecoder::new().unwrap();
     let mut pcm = [0f32; FRAME_SAMPLES];
