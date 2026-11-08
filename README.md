@@ -280,6 +280,8 @@ No incluye el coste propio de Minecraft por cada jugador conectado (entidades, c
 
 Para lanzarlo en tu servidor de pruebas: pon `pause-when-empty-seconds=0` en `server.properties` (si no, Minecraft deja de hacer ticks a los 60 s sin jugadores reales), arranca con `-Dferrovoz.bench=100` (opcional: `-Dferrovoz.bench.layout=crowd`, `-Dferrovoz.bench.seconds=120`, `-Dferrovoz.bench.talking=20`) y, en la misma máquina, ejecuta `cargo run --release --example bench_clients -- <carpeta del servidor>/ferrovoz-bench`. **No lo uses en un servidor con jugadores:** fuerza la carga de chunks y apaga el servidor al terminar.
 
+Lo más fácil es el kit de [`tools/bench`](tools/bench/LEEME.md): hace tres pasadas seguidas (servidor normal, evento de 250 y el evento con un solo hilo recibiendo) y guarda los informes. El CI deja el kit listo para Windows y Linux, con el programa de los clientes compilado, en los artefactos `bench-clients-*`.
+
 ### Solo el relé (`cargo test --release --test load -- --ignored --nocapture`)
 
 El relé aislado, con clientes falsos por UDP real. Medido en una máquina de 2 núcleos (los clientes falsos comparten esos núcleos):

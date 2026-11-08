@@ -109,6 +109,22 @@ jobs:
         with:
           name: native-${{ matrix.platform }}
           path: native/out/*
+      # Kit de benchmark (tools/bench) con el programa de los clientes para este sistema,
+      # para lanzarlo en un servidor sin instalar Rust.
+      - name: Kit de benchmark
+        if: ${{ !startsWith(matrix.platform, 'macos') }}
+        shell: bash
+        run: |
+          cargo build --release --no-default-features --example bench_clients \
+            --manifest-path native/Cargo.toml --target-dir native/target/server
+          mkdir -p bench-kit
+          cp tools/bench/run-bench.bat tools/bench/run-bench.sh tools/bench/LEEME.md bench-kit/
+          cp "native/target/server/release/examples/bench_clients${{ runner.os == 'Windows' && '.exe' || '' }}" bench-kit/
+      - uses: actions/upload-artifact@v4
+        if: ${{ !startsWith(matrix.platform, 'macos') }}
+        with:
+          name: bench-clients-${{ matrix.platform }}
+          path: bench-kit/
 
   # Solo macOS: zip con natives/ listo para descomprimir en mod/natives-prebuilt/.
   natives-mac:

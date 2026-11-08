@@ -5,6 +5,7 @@ sección de esa versión como notas de la release.
 
 ## [Sin publicar]
 
+- **Kit de benchmark** (`tools/bench`): tres pasadas seguidas en un servidor de Fabric de pruebas (servidor normal, evento de 250 y evento con un solo hilo recibiendo), para Windows y Linux. El CI compila el programa de los clientes de prueba para cada sistema, así que no hace falta instalar Rust en el servidor.
 - **Contraseñas de grupo protegidas**: ya no se guardan tal cual ni en memoria ni en `ferrovoz-data.txt`, sino como PBKDF2-HMAC-SHA256 con una sal por grupo. Las de versiones anteriores se convierten solas al arrancar. En Paper, además, la contraseña de `/voz grupo crear|unirse` ya no queda en el log de la consola: se escribe tapada.
 - **Aviso al borrar un grupo**: sus miembros reciben un mensaje en su idioma (antes se quedaban sin grupo sin saber por qué).
 - **Los nombres de grupo no pueden llevar `§`**, que servía para meter colores o romper el formato de los mensajes del chat.
