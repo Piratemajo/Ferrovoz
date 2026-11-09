@@ -280,14 +280,12 @@ En un servidor de 20 núcleos (Java 25, 120 s de medición por pasada, clientes 
 
 | Pasada | Jugadores / hablando | TPS | Lo que Ferrovoz añade al tick (media / p99) | CPU del relé | Paquetes enviados/s | Perdidos |
 |---|---|---|---|---|---|---|
-| Servidor normal | 100 repartidos / 20 | 20,0 | 0,14 / 0,55 ms | 11 % de un núcleo | 13 100 | 0 |
-| Servidor grande | 500 repartidos / 100 | 20,0 | 0,48 / 1,37 ms | 59 % | 76 300 | 0 |
-| Evento | 250 juntos / 150 | 20,0 | 1,09 / 4,13 ms | 258 % | 308 000 | 0 |
-| Evento gigante | 500 juntos / 300 | 20,0 | 3,72 / 12,93 ms¹ | 731 % | 618 600 | 0 |
+| Servidor normal | 100 repartidos / 20 | 20,0 | 0,17 / 0,62 ms | 12 % de un núcleo | 13 100 | 0 |
+| Servidor grande | 500 repartidos / 100 | 20,0 | 0,72 / 1,99 ms | 67 % | 76 300 | 0 |
+| Evento | 250 juntos / 150 | 20,0 | 0,80 / 2,46 ms | 268 % | 308 700 | 0 |
+| Evento gigante | 500 juntos / 300 | 20,0 | 1,12 / 3,78 ms | 549 % | 618 600 | 0 |
 
-En los eventos, cada jugador recibe sus 24 voces más cercanas por separado y el murmullo: 1 240 paquetes por segundo cada uno, sin ninguno rechazado ni limitado. La memoria de Java no crece.
-
-¹ Casi todo eran picos cada 4 ticks al buscar a quién calcular paredes: se recorrían todas las parejas posibles (300 × 500). Ahora solo se miran las voces que cada uno oye por separado, y esa búsqueda pasa de unos 13 ms a menos de 1 ms (medido aparte, mismo resultado).
+En los eventos, cada jugador recibe sus 24 voces más cercanas por separado y el murmullo: 1 240 paquetes por segundo cada uno, sin ninguno rechazado ni limitado. Llegan al relé todas las tramas que se envían (15 000 por segundo en el evento gigante) y el hilo que las recibe va al 61 % de un núcleo, así que aún tiene margen. La memoria de Java no crece.
 
 No incluye el coste propio de Minecraft por cada jugador conectado (entidades, chunks, red del juego): eso existe con o sin Ferrovoz.
 
