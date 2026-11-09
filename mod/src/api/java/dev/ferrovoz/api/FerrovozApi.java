@@ -55,7 +55,10 @@ public interface FerrovozApi {
     /** Ferrovoz version, e.g. {@code "0.12.0"}. */
     String version();
 
-    /** {@code "Fabric"}, {@code "NeoForge"}, {@code "Forge"}, {@code "Paper"}, {@code "Spigot"} or {@code "Folia"}. */
+    /**
+     * {@code "Fabric"}, {@code "NeoForge"}, {@code "Forge"}, {@code "Paper"}, {@code "Spigot"} or {@code "Folia"}.
+     * On Quilt it is {@code "Fabric"}: Quilt runs Fabric mods and Fabric API.
+     */
     String platform();
 
     /** The voice relay is running. */

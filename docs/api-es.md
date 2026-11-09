@@ -9,7 +9,7 @@ Con la API, otro plugin o mod del servidor puede:
 - **Poner sonido**: canales de audio que suenan desde un punto, siguiendo a un jugador, a unos jugadores concretos o a un grupo, con 3D como la voz. WAV, PCM u Opus.
 - **Escuchar la voz**: recibir el audio de cada jugador para grabarlo, transcribirlo o hacer un bot.
 
-Es la misma en **Fabric, NeoForge, Forge y Paper/Spigot/Folia**, y en **26.3 y 1.21.1**: no usa ninguna clase de Minecraft. Solo funciona en el servidor.
+Es la misma en **Fabric, Quilt, NeoForge, Forge y Paper/Spigot/Folia**, y en **26.3 y 1.21.1**: no usa ninguna clase de Minecraft. Solo funciona en el servidor.
 
 Todo lo de esta página está en el paquete `dev.ferrovoz.api` y tiene javadoc.
 
@@ -28,7 +28,8 @@ Y declara que usas Ferrovoz, para que cargue antes:
 | Plataforma | Dónde | Qué poner |
 |---|---|---|
 | Paper/Spigot/Folia | `plugin.yml` | `depend: [Ferrovoz]` (o `softdepend` si es opcional) |
-| Fabric | `fabric.mod.json` | `"depends": { "ferrovoz": "*" }` (o `"suggests"`) |
+| Fabric (y Quilt) | `fabric.mod.json` | `"depends": { "ferrovoz": "*" }` (o `"suggests"`) |
+| Quilt | `quilt.mod.json` | `"depends": [ "ferrovoz" ]` dentro de `quilt_loader` |
 | NeoForge / Forge | `mods.toml` | una `[[dependencies.tumod]]` con `modId="ferrovoz"` |
 
 ## Conseguir la API

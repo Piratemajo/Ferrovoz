@@ -1,7 +1,7 @@
 # Ferrovoz
 
 Chat de voz de proximidad para **Minecraft 26.3** y **1.21.1** con el motor escrito en **Rust**. Por **Piratemajo**.
-Un solo `.jar` para todo: mod de **Fabric**, **NeoForge** o **Forge** (cliente y servidor), plugin de **Paper / Purpur / Folia / Spigot** y plugin de proxy para **Velocity / BungeeCord** y derivados.
+Un solo `.jar` para todo: mod de **Fabric**, **Quilt**, **NeoForge** o **Forge** (cliente y servidor), plugin de **Paper / Purpur / Folia / Spigot** y plugin de proxy para **Velocity / BungeeCord** y derivados.
 Java solo hace de pegamento con el juego; captura, códec, red, cifrado, mezcla y efectos viven en Rust.
 
 ## Funciones
@@ -37,7 +37,7 @@ Java solo hace de pegamento con el juego; captura, códec, red, cifrado, mezcla 
 - **Idiomas**: español, inglés, **portugués, francés y alemán**, en el juego (ajustes, HUD, avisos) y en los mensajes del servidor y del proxy, según el idioma de Minecraft de cada jugador (cualquier variante: `pt_br`, `fr_ca`, `de_at`…). El resto, en inglés. Comandos: `/voz grupo crear` (subcomandos en español) y `/voice group create` (en inglés, el que usan los demás idiomas). Para añadir otro idioma basta con un `messages_<idioma>.properties` y un `<idioma>.json`.
 
 **Para administrar**
-- **API para plugins y mods** (`dev.ferrovoz.api`), la misma en Fabric, NeoForge, Forge y Paper, en 26.3 y 1.21.1. Sirve para controlar la voz (silenciar, permisos, megáfono, silencio general, grupos, ajustes en marcha), recibir eventos (quién conecta, habla, calla o cambia de grupo, y cancelar crear grupos, unirse o silenciar), poner sonido con canales de audio (desde un punto, siguiendo a alguien, a unos jugadores o a un grupo, con 3D; WAV, PCM u Opus) y escuchar la voz para grabarla o hacer bots. Ver [docs/api-es.md](docs/api-es.md) (en inglés: [docs/api.md](docs/api.md)). El javadoc de la API está en inglés.
+- **API para plugins y mods** (`dev.ferrovoz.api`), la misma en Fabric, Quilt, NeoForge, Forge y Paper, en 26.3 y 1.21.1. Sirve para controlar la voz (silenciar, permisos, megáfono, silencio general, grupos, ajustes en marcha), recibir eventos (quién conecta, habla, calla o cambia de grupo, y cancelar crear grupos, unirse o silenciar), poner sonido con canales de audio (desde un punto, siguiendo a alguien, a unos jugadores o a un grupo, con 3D; WAV, PCM u Opus) y escuchar la voz para grabarla o hacer bots. Ver [docs/api-es.md](docs/api-es.md) (en inglés: [docs/api.md](docs/api.md)). El javadoc de la API está en inglés.
 - **Moderación**: `/voz silenciar <jugador>`, `/voz desilenciar <jugador>` y `/voz estado`. Los silencios se **guardan en disco**: siguen aunque el jugador salga o el servidor se reinicie.
 - **Espectadores y muertos**: cada servidor elige qué oyen y a quién se oye (`spectators` y `dead` en `ferrovoz.properties`):
 
@@ -160,7 +160,7 @@ Se compila con **JDK 21** (el de Minecraft 1.21.1):
 cd mod-1.21.1 && ./gradlew build
 ```
 
-Sale un solo jar, `mod-1.21.1/build/libs/ferrovoz-1.21.1-<versión>.jar`, igual que en 26.3: Fabric, NeoForge 21.1, Forge 52, Paper/Spigot/Purpur/Folia y Velocity/BungeeCord. Como en 1.21.1 Fabric usa los nombres ofuscados de Minecraft y NeoForge/Forge los de Mojang, el jar lleva dos copias de las clases que tocan el juego: la de Mojang en `dev.ferrovoz` y la de Fabric en `dev.ferrovoz.intermediary` (la tarea `relocateFabric`). `FerrovozNative` y `FerrovozLog` no se duplican.
+Sale un solo jar, `mod-1.21.1/build/libs/ferrovoz-1.21.1-<versión>.jar`, igual que en 26.3: Fabric y Quilt (con Fabric API o Quilted Fabric API), NeoForge 21.1, Forge 52, Paper/Spigot/Purpur/Folia y Velocity/BungeeCord. Como en 1.21.1 Fabric usa los nombres ofuscados de Minecraft y NeoForge/Forge los de Mojang, el jar lleva dos copias de las clases que tocan el juego: la de Mojang en `dev.ferrovoz` y la de Fabric en `dev.ferrovoz.intermediary` (la tarea `relocateFabric`). `FerrovozNative` y `FerrovozLog` no se duplican.
 
 Los binarios nativos de otras plataformas se leen de la misma carpeta que la 26.3 (`mod/natives-prebuilt/`). Diferencias con la 26.3: en Fabric los permisos usan `fabric-permissions-api` (la de LuckPerms, va dentro del jar) con los mismos nodos `ferrovoz.*`; el resto funciona igual. El protocolo de voz es el mismo, así que el plugin de proxy sirve para redes con servidores de las dos versiones.
 
@@ -183,13 +183,14 @@ Hay un `.jar` por versión de Minecraft (26.3 y 1.21.1), y cada uno vale para to
 | Dónde | Cargador | Dónde va el jar | Además | Configuración |
 |---|---|---|---|---|
 | Jugadores o servidor | **Fabric** 26.3 | `mods/` | Fabric API | `config/ferrovoz.properties` |
+| Jugadores o servidor | **Quilt** 26.3 (Loader 0.31+) | `mods/` | Fabric API | `config/ferrovoz.properties` |
 | Jugadores o servidor | **NeoForge** 26.3 | `mods/` | - | `config/ferrovoz.properties` |
 | Jugadores o servidor | **Forge** 26.3 (66.1+) | `mods/` | - | `config/ferrovoz.properties` |
 | Servidor | **Paper, Purpur, Folia o Spigot** 26.3 | `plugins/` | - | `plugins/Ferrovoz/ferrovoz.properties` |
 
 | Proxy | **Velocity** 4.3+ o **BungeeCord** (y derivados) | `plugins/` | Java 25 | `plugins/ferrovoz/ferrovoz-proxy.properties` (Velocity) · `plugins/Ferrovoz/ferrovoz-proxy.properties` (BungeeCord) |
 
-Los jugadores deben usar el **mismo cargador que el servidor**, excepto con Paper/Spigot: ahí sirve el cliente de Fabric. Fabric, NeoForge y Forge envían los mismos datos por la red, así que un cliente de un cargador con un servidor de otro también debería funcionar, pero no se ha probado.
+Los jugadores deben usar el **mismo cargador que el servidor**, excepto con Paper/Spigot: ahí sirve el cliente de Fabric. Quilt usa el mismo jar que Fabric, así que un cliente de Quilt con un servidor de Fabric (o al revés) va igual que si fueran los dos del mismo. Fabric, NeoForge y Forge envían los mismos datos por la red, así que un cliente de un cargador con un servidor de otro también debería funcionar, pero no se ha probado.
 
 Quien entre sin el mod juega normal, solo que sin voz. En Folia cada jugador se procesa en el hilo de su región. No uses `/reload` con Ferrovoz: reinicia el servidor.
 

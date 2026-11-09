@@ -19,7 +19,7 @@ import java.util.Random;
 import java.util.UUID;
 
 /**
- * Benchmark en un servidor de Fabric real. Solo con {@code -Dferrovoz.bench=<jugadores>}.
+ * Benchmark en un servidor real (Fabric, Quilt, NeoForge o Forge). Solo con {@code -Dferrovoz.bench=<jugadores>}.
  *
  * <p>Mide lo que Ferrovoz cuesta al servidor de Minecraft, no solo al relé:
  * <ol>
@@ -407,7 +407,7 @@ final class Bench {
         double receiving = st.length >= 10 && status0.length >= 10 ? (st[9] - status0[9]) / wall / 1e7 : -1;
 
         String r = String.format(Locale.ROOT, """
-                # Benchmark de Ferrovoz en un servidor de Fabric
+                # Benchmark de Ferrovoz en un servidor de %s
 
                 %d jugadores virtuales (%s), %d hablando (%d %%), %d s de medición. Máquina: %d núcleos, Java %s.
 
@@ -430,7 +430,7 @@ final class Bench {
                 | Memoria Java (tras GC) | %.1f MB → %.1f MB |
                 | Memoria del proceso (RSS) | %s |
                 """,
-                PLAYERS, LAYOUT, talkers, TALKING, SECONDS, cores, System.getProperty("java.version"),
+                Ferrovoz.loader(), PLAYERS, LAYOUT, talkers, TALKING, SECONDS, cores, System.getProperty("java.version"),
                 idleTicks.avgMs(), measureTicks.avgMs(),
                 idleTicks.pctMs(95), idleTicks.pctMs(99), measureTicks.pctMs(95), measureTicks.pctMs(99),
                 idleTicks.pctMs(100), measureTicks.pctMs(100),

@@ -30,8 +30,13 @@ public final class Ferrovoz {
 
     /** Lo que depende del loader. */
     public interface Platform {
-        /** "Fabric", "NeoForge", "Forge" (para el log). */
+        /** "Fabric", "NeoForge", "Forge": la API de mods que hay (la que ve {@code FerrovozApi.platform()}). */
         String name();
+
+        /** El loader que corre de verdad, para el log y el benchmark: Quilt carga los mods de Fabric. */
+        default String loader() {
+            return name();
+        }
 
         Path configDir();
 
@@ -72,6 +77,11 @@ public final class Ferrovoz {
     private static int ticks;
 
     private Ferrovoz() {}
+
+    /** "Fabric", "Quilt", "NeoForge" o "Forge". */
+    static String loader() {
+        return platform == null ? "?" : platform.loader();
+    }
 
     /**
      * Al cargar el mod. Sin librería nativa para esta plataforma el juego sigue, sin
@@ -147,7 +157,7 @@ public final class Ferrovoz {
             if (p != null) platform.sendTunnel(p, packet);
         });
         api.started(server, config);
-        LOG.info("Ferrovoz: voice chat running ({})", platform.name());
+        LOG.info("Ferrovoz: voice chat running ({})", platform.loader());
         Bench.start(srv); // solo con -Dferrovoz.bench=N
     }
 

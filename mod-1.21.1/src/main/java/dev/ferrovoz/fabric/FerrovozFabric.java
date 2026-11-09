@@ -62,6 +62,11 @@ public final class FerrovozFabric implements ModInitializer, Ferrovoz.Platform {
     }
 
     @Override
+    public String loader() {
+        return FabricLoader.getInstance().isModLoaded("quilt_loader") ? "Quilt" : "Fabric";
+    }
+
+    @Override
     public Path configDir() {
         return FabricLoader.getInstance().getConfigDir();
     }

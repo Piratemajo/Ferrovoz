@@ -1,7 +1,7 @@
 name: build
 
-# - push a main y pull requests: tests y jar con las 5 plataformas (no con cambios
-#   solo en .md o docs/).
+# - push a main y pull requests: tests, jar con las 5 plataformas y arranque de un
+#   servidor de verdad en Fabric y Quilt (no con cambios solo en .md o docs/).
 # - Etiqueta vX.Y.Z: además publica la release en este repo.
 # - Manual: "todas", o "macos" para sacar solo los binarios de Mac.
 on:
@@ -194,10 +194,39 @@ jobs:
           name: ferrovoz-mod
           path: mod/build/libs/*.jar
 
+  # Arranca un servidor dedicado de verdad con el jar, en Fabric y en Quilt, y comprueba
+  # que la voz se pone en marcha.
+  server:
+    needs: mod
+    if: inputs.plataformas != 'macos'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        loader: [fabric, quilt]
+        mc: ["26.3", "1.21.1"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.mc == '1.21.1' && 21 || 25 }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: ferrovoz-mod
+          path: jar
+      - name: Servidor de ${{ matrix.loader }} ${{ matrix.mc }}
+        run: |
+          props=$([ "${{ matrix.mc }}" = 1.21.1 ] && echo mod-1.21.1/gradle.properties || echo mod/gradle.properties)
+          FAPI=$(grep '^fabric_api_version=' "$props" | cut -d= -f2)
+          JAR=$(ls jar/ferrovoz-${{ matrix.mc }}-*.jar | grep -v -- '-sources' | head -1)
+          bash tools/server_smoke.sh ${{ matrix.loader }} ${{ matrix.mc }} "$FAPI" "$JAR"
+
   # Al subir una etiqueta vX.Y.Z publica la release en este repo con el jar y las
   # notas de CHANGELOG.md.
   release:
-    needs: mod
+    needs: [mod, server]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
