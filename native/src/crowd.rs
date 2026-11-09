@@ -11,7 +11,7 @@
 //! número de zonas con gente, no del de oyentes: con 250 personas juntas, unas
 //! decenas de mezclas cada 20 ms.
 //!
-//! El murmullo llega como un hablante más ([`CROWD_ID`]), así que los clientes no
+//! El murmullo llega como un hablante más ([`crate::protocol::CROWD_ID`]), así que los clientes no
 //! necesitan saber nada de esto.
 
 use crate::codec::{VoiceDecoder, VoiceEncoder};

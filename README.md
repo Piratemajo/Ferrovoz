@@ -88,7 +88,7 @@ Java solo hace de pegamento con el juego; captura, códec, red, cifrado, mezcla 
 | Ruta | Qué hay |
 |---|---|
 | `native/src/protocol.rs` | Formato de paquetes y cifrado |
-| `native/src/server.rs` | Relé: alcances, grupos, silencios, permisos, túnel, medición de pérdida |
+| `native/src/server/` | Relé: recibir y reenviar la voz, alcances, silencios, permisos, túnel y pérdida (`mod.rs`); grupos, canales de audio de la API, multitudes, paredes, eventos y archivo de datos, cada uno en su módulo |
 | `native/src/client.rs` | Cliente: transporte UDP/túnel, bitrate adaptativo, mezcla con paredes, eco y volumen por jugador |
 | `native/src/codec.rs` · `denoise.rs` · `reverb.rs` · `underwater.rs` | Opus · limpieza del micro · eco · voz bajo el agua |
 | `native/src/jitter.rs` · `spatial.rs` · `resample.rs` | Jitter buffer · audio 3D · remuestreo |
