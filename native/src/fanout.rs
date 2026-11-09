@@ -42,8 +42,8 @@ impl SealJob {
     }
 }
 
-/// Por debajo de esto no compensa repartir.
-const MIN_PARALLEL: usize = 32;
+/// Paquetes por lote como mínimo: menos, y mover el lote cuesta más que enviarlo.
+const MIN_CHUNK: usize = 32;
 /// Lotes en cola por hilo; si se llena, lo hace el hilo que recibe.
 const QUEUE_PER_WORKER: usize = 8;
 
@@ -96,30 +96,30 @@ impl Pool {
         self.threads.len()
     }
 
-    /// Cifra y envía `jobs`, parte aquí y parte en los auxiliares.
+    /// Cifra y envía `jobs` en los auxiliares, en trozos iguales de al menos
+    /// [`MIN_CHUNK`]. El hilo que llama (el que recibe) solo envía si no hay
+    /// auxiliares o sus colas están llenas: así queda libre para recibir. Importa sobre
+    /// todo en Windows, donde cada envío es una llamada al sistema de varios µs; en
+    /// Linux van en lotes con `sendmmsg`.
     pub fn dispatch(&self, mut jobs: Vec<SealJob>) {
         let Some(tx) = &self.tx else {
             (self.on_sent)(seal_and_send(&self.socket, jobs), 0);
             return;
         };
-        if jobs.len() < MIN_PARALLEL {
-            (self.on_sent)(seal_and_send(&self.socket, jobs), 0);
-            return;
-        }
-        // Trozos iguales para cada hilo.
-        let parts = self.threads.len() + 1;
-        let chunk = jobs.len().div_ceil(parts);
+        let parts = self.threads.len().min(jobs.len().div_ceil(MIN_CHUNK)).max(1);
+        let chunk = jobs.len().div_ceil(parts).max(1);
         let mut mine = Vec::new();
-        while jobs.len() > chunk {
-            let rest = jobs.split_off(jobs.len() - chunk);
-            match tx.try_send(rest) {
+        while !jobs.is_empty() {
+            let part = if jobs.len() > chunk { jobs.split_off(jobs.len() - chunk) } else { std::mem::take(&mut jobs) };
+            match tx.try_send(part) {
                 Ok(()) => {}
                 // Cola llena: se hace aquí, así nunca se acumula retraso.
-                Err(TrySendError::Full(rest)) | Err(TrySendError::Disconnected(rest)) => mine.extend(rest),
+                Err(TrySendError::Full(part)) | Err(TrySendError::Disconnected(part)) => mine.extend(part),
             }
         }
-        mine.extend(jobs);
-        (self.on_sent)(seal_and_send(&self.socket, mine), 0);
+        if !mine.is_empty() {
+            (self.on_sent)(seal_and_send(&self.socket, mine), 0);
+        }
     }
 }
 

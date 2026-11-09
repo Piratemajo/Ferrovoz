@@ -60,7 +60,7 @@ https://github.com/xiph/rnnoise  —  BSD-3-Clause (texto en el bloque de nnnois
 ------------------------------------------------------------
 
 ============================================================
-Crates de Rust (98)
+Crates de Rust (100)
 ============================================================
 
 ------------------------------------------------------------
@@ -1396,6 +1396,7 @@ DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------
 cfg-if 1.0.5  (MIT OR Apache-2.0)  https://github.com/rust-lang/cfg-if
+socket2 0.5.10  (MIT OR Apache-2.0)  https://github.com/rust-lang/socket2
 ------------------------------------------------------------
 --- LICENSE-APACHE ---
 Apache License
@@ -9804,6 +9805,7 @@ windows-core 0.54.0  (MIT OR Apache-2.0)  https://github.com/microsoft/windows-r
 windows-link 0.2.1  (MIT OR Apache-2.0)  https://github.com/microsoft/windows-rs
 windows-result 0.1.2  (MIT OR Apache-2.0)  https://github.com/microsoft/windows-rs
 windows-sys 0.45.0  (MIT OR Apache-2.0)  https://github.com/microsoft/windows-rs
+windows-sys 0.52.0  (MIT OR Apache-2.0)  https://github.com/microsoft/windows-rs
 windows-sys 0.61.2  (MIT OR Apache-2.0)  https://github.com/microsoft/windows-rs
 windows-targets 0.42.2  (MIT OR Apache-2.0)  https://github.com/microsoft/windows-rs
 windows-targets 0.52.6  (MIT OR Apache-2.0)  https://github.com/microsoft/windows-rs

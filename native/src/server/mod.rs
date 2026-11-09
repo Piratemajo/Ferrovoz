@@ -257,6 +257,9 @@ pub struct ServerStats {
     /// Tiempo (ns) de trabajo de los hilos del relé, incluidos los auxiliares.
     /// Dividido entre el tiempo real da el uso de CPU (100 % = un núcleo).
     pub busy_ns: AtomicU64,
+    /// Lo mismo, solo de los hilos que reciben. Si se acerca al 100 % por hilo, no dan
+    /// abasto y se pierden paquetes a la entrada.
+    pub receive_busy_ns: AtomicU64,
 }
 
 struct State {
@@ -325,6 +328,24 @@ fn receiver_threads() -> usize {
 /// Paquetes UDP pendientes de enviar.
 type Outgoing = Vec<(SocketAddr, Vec<u8>)>;
 
+/// Búferes del sistema para el socket del relé. Los de por defecto (64 KB en Windows)
+/// se llenan en una ráfaga de unos cientos de tramas, por ejemplo cuando 300 personas
+/// hablan a la vez y el hilo que recibe se para un momento; lo que no cabe se pierde.
+const SOCKET_BUFFER: usize = 4 << 20;
+
+fn bind_udp(bind: SocketAddr) -> io::Result<UdpSocket> {
+    use socket2::{Domain, Protocol, Socket, Type};
+    let socket = Socket::new(Domain::for_address(bind), Type::DGRAM, Some(Protocol::UDP))?;
+    // Si el sistema da menos, se sigue con lo que dé.
+    let _ = socket.set_recv_buffer_size(SOCKET_BUFFER);
+    let _ = socket.set_send_buffer_size(SOCKET_BUFFER);
+    socket.bind(&bind.into())?;
+    if let (Ok(r), Ok(w)) = (socket.recv_buffer_size(), socket.send_buffer_size()) {
+        log::info!("voice relay: UDP buffers {} KB in / {} KB out", r / 1024, w / 1024);
+    }
+    Ok(socket.into())
+}
+
 fn valid_text(s: &str, max: usize) -> bool {
     !s.is_empty() && s.chars().count() <= max && !s.chars().any(|c| c.is_control())
 }
@@ -337,7 +358,7 @@ impl VoiceServer {
     /// Como [`Self::start`], con un número de hilos que reciben a mano.
     pub fn start_with_receivers(bind: SocketAddr, max_distance: f32, receivers: usize) -> io::Result<Self> {
         let receivers = receivers.clamp(1, 16);
-        let socket = UdpSocket::bind(bind)?;
+        let socket = bind_udp(bind)?;
         let saver = Arc::new(Saver::default());
         let saver_thread = {
             let saver = saver.clone();
@@ -762,7 +783,9 @@ impl Shared {
             if !jobs.is_empty() {
                 pool.dispatch(std::mem::take(&mut jobs));
             }
-            self.stats.busy_ns.fetch_add(started.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            let busy = started.elapsed().as_nanos() as u64;
+            self.stats.busy_ns.fetch_add(busy, Ordering::Relaxed);
+            self.stats.receive_busy_ns.fetch_add(busy, Ordering::Relaxed);
         }
     }
 

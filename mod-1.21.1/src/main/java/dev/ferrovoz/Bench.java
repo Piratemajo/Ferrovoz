@@ -403,6 +403,8 @@ final class Bench {
         int cores = Runtime.getRuntime().availableProcessors();
         double pin = (st[3] - status0[3]) / wall, pout = (st[4] - status0[4]) / wall;
         double tps = measureTicks.count() / wall;
+        // Hilo que recibe: si va cerca del 100 %, no da abasto y se pierde voz a la entrada.
+        double receiving = st.length >= 10 && status0.length >= 10 ? (st[9] - status0[9]) / wall / 1e7 : -1;
 
         String r = String.format(Locale.ROOT, """
                 # Benchmark de Ferrovoz en un servidor de Fabric
@@ -421,6 +423,7 @@ final class Bench {
                 | Recurso | Valor |
                 |---|---|
                 | CPU del relé de voz (sus hilos) | %.1f %% de un núcleo |
+                | Ocupación del hilo que recibe | %s |
                 | CPU de todo el proceso del servidor | %.1f %% de un núcleo |
                 | Paquetes de voz recibidos / enviados por segundo | %.0f / %.0f |
                 | Rechazados / limitados durante la medición | %d / %d |
@@ -434,6 +437,7 @@ final class Bench {
                 tps,
                 measureFerrovoz.avgMs(), measureFerrovoz.pctMs(95), measureFerrovoz.pctMs(99), measureFerrovoz.pctMs(100),
                 relay < 0 ? -1.0 : 100.0 * relay / 1e9 / wall,
+                receiving < 0 ? "n/d" : String.format(Locale.ROOT, "%.1f %% de un núcleo", receiving),
                 cpu < 0 ? -1.0 : 100.0 * cpu / 1e9 / wall,
                 pin, pout, st[5] - status0[5], st[7] - status0[7],
                 idleHeap / 1048576.0, heap / 1048576.0,

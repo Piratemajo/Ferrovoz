@@ -872,12 +872,13 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverIsMuted(_: JNIEnv,
     jbool(guard(false, || server(h).is_some_and(|s| s.is_muted(&protocol::uuid_from_java(msb, lsb)))))
 }
 
-/// `[conectados, por túnel, grupos, recibidos, enviados, rechazados, replay, limitados]`.
+/// `[conectados, por túnel, grupos, recibidos, enviados, rechazados, replay, limitados,
+/// ns ocupado del relé, ns ocupado de los hilos que reciben]`.
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverStatus(env: JNIEnv, _: JClass, h: jlong) -> jlongArray {
     use std::sync::atomic::Ordering::Relaxed;
-    let v: [jlong; 9] = guard([0; 9], || {
-        server(h).map_or([0; 9], |s| {
+    let v: [jlong; 10] = guard([0; 10], || {
+        server(h).map_or([0; 10], |s| {
             let st = s.stats();
             [
                 s.connected_count() as jlong,
@@ -889,6 +890,7 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_serverStatus(env: JNIEnv
                 st.replayed.load(Relaxed) as jlong,
                 st.rate_limited.load(Relaxed) as jlong,
                 st.busy_ns.load(Relaxed) as jlong,
+                st.receive_busy_ns.load(Relaxed) as jlong,
             ]
         })
     });

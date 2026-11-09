@@ -316,7 +316,7 @@ Antes de la 0.9 (un solo hilo, un envío por paquete) el caso extremo se quedaba
 
 ## Licencias
 
-Ferrovoz es MIT. El jar incluye `META-INF/THIRD_PARTY_LICENSES.txt` con las licencias de todo lo que llevan dentro las librerías nativas: libopus (BSD-3), RNNoise (BSD-3), el procesado de audio de WebRTC portado a Rust (`sonora`, BSD-3) y 98 crates de Rust (MIT, Apache-2.0, BSD, ISC…). Se genera con `python3 tools/third_party_licenses.py` y el CI falla si las dependencias cambian y el archivo no se actualiza.
+Ferrovoz es MIT. El jar incluye `META-INF/THIRD_PARTY_LICENSES.txt` con las licencias de todo lo que llevan dentro las librerías nativas: libopus (BSD-3), RNNoise (BSD-3), el procesado de audio de WebRTC portado a Rust (`sonora`, BSD-3) y 100 crates de Rust (MIT, Apache-2.0, BSD, ISC…). Se genera con `python3 tools/third_party_licenses.py` y el CI falla si las dependencias cambian y el archivo no se actualiza.
 
 ## Tests
 
