@@ -209,3 +209,52 @@ fn tunnel_rejects_packets_from_another_player() {
     s.handle_tunnel(&b, &hello_b);
     assert_eq!(s.stats().replayed.load(Ordering::Relaxed), 1);
 }
+
+/// Lo que cuesta repartir una trama con 500 juntos y 300 hablando (sin red: solo el
+/// trabajo del hilo que recibe, con el lock).
+#[test]
+#[ignore = "medida: cargo test --release --lib route_cost -- --ignored --nocapture"]
+fn route_cost_with_500_together() {
+    let s = VoiceServer::start_with_receivers("127.0.0.1:0".parse().unwrap(), 48.0, 1).unwrap();
+    s.set_max_voices(24);
+    let mut keys = Vec::new();
+    for i in 0..500u32 {
+        let mut id = [0u8; 16];
+        id[..4].copy_from_slice(&i.to_le_bytes());
+        let key = s.add_player(id);
+        s.update_player(&id, [(i % 10) as f64 * 2.0, 64.0, (i / 10) as f64 * 2.0], 1);
+        s.state().players.get_mut(&id).unwrap().transport = Transport::Udp("127.0.0.1:9".parse().unwrap());
+        if i % 5 < 3 {
+            keys.push((id, key));
+        }
+    }
+    let addr: SocketAddr = "127.0.0.1:9".parse().unwrap();
+    let mut counter = 10u64;
+    let mut send_round = |s: &VoiceServer, seq: u32| -> (Duration, usize) {
+        let mut total = Duration::ZERO;
+        let mut sent = 0;
+        for (id, key) in &keys {
+            counter += 1;
+            let body = AudioUp { seq, talk: TalkMode::Normal, env: Environment::default(), opus: vec![0xF8; 60] }.encode();
+            let pkt = protocol::seal(key, PacketType::AudioUp, Some(id), &body, counter);
+            let (mut out, mut jobs) = (Vec::new(), Vec::new());
+            let t = Instant::now();
+            let _ = s.shared.handle(&pkt, Source::Udp(addr), &mut out, &mut jobs);
+            total += t.elapsed();
+            sent += jobs.len();
+        }
+        (total, sent)
+    };
+    // Que todos hablen y haya plan de multitudes.
+    send_round(&s, 1);
+    s.shared.plan_crowds();
+    let mut best = f64::MAX;
+    for seq in 2..8 {
+        std::thread::sleep(Duration::from_millis(25)); // el límite por jugador se recarga
+        let (t, jobs) = send_round(&s, seq);
+        let per_frame = t.as_secs_f64() * 1e6 / keys.len() as f64;
+        best = best.min(per_frame);
+        println!("ronda {seq}: {per_frame:.1} µs por trama, {:.1} oyentes por trama", jobs as f64 / keys.len() as f64);
+    }
+    println!("mejor: {best:.1} µs por trama ({:.0} tramas/s en un hilo)", 1e6 / best);
+}

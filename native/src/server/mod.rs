@@ -201,6 +201,8 @@ struct Player {
     control_bucket: TokenBucket,
     pos: [f64; 3],
     dimension: i32,
+    /// Zona de multitudes de `pos`; se recalcula solo al moverse (ver [`Player::place`]).
+    cell: Cell,
     /// Cabeza bajo el agua.
     underwater: bool,
     /// Vivo, espectador o muerto (ver [`crate::roles`]).
@@ -223,6 +225,12 @@ struct Player {
 }
 
 impl Player {
+    fn place(&mut self, pos: [f64; 3], dimension: i32) {
+        self.pos = pos;
+        self.dimension = dimension;
+        self.cell = Cell::of(pos, dimension);
+    }
+
     fn seal(&mut self, kind: PacketType, body: &[u8]) -> Vec<u8> {
         self.tx_counter += 1;
         protocol::seal(&self.key, kind, None, body, self.tx_counter)
@@ -442,6 +450,7 @@ impl VoiceServer {
                     control_bucket: TokenBucket::new(CONTROL_RATE, CONTROL_BURST),
                     pos: [0.0; 3],
                     dimension: 0,
+                    cell: Cell::of([0.0; 3], 0),
                     underwater: false,
                     role: Role::Alive,
                     self_flags: 0,
@@ -484,16 +493,14 @@ impl VoiceServer {
 
     pub fn update_player(&self, id: &PlayerId, pos: [f64; 3], dimension: i32) {
         if let Some(p) = self.state().players.get_mut(id) {
-            p.pos = pos;
-            p.dimension = dimension;
+            p.place(pos, dimension);
         }
     }
 
     /// Como [`Self::update_player`], más si tiene la cabeza bajo el agua.
     pub fn update_player_full(&self, id: &PlayerId, pos: [f64; 3], dimension: i32, underwater: bool) {
         if let Some(p) = self.state().players.get_mut(id) {
-            p.pos = pos;
-            p.dimension = dimension;
+            p.place(pos, dimension);
             p.underwater = underwater;
         }
     }
@@ -501,8 +508,7 @@ impl VoiceServer {
     /// Como [`Self::update_player_full`], más el rol (vivo, espectador, muerto).
     pub fn update_player_with_role(&self, id: &PlayerId, pos: [f64; 3], dimension: i32, underwater: bool, role: Role) {
         if let Some(p) = self.state().players.get_mut(id) {
-            p.pos = pos;
-            p.dimension = dimension;
+            p.place(pos, dimension);
             p.underwater = underwater;
             p.role = role;
         }
@@ -515,8 +521,7 @@ impl VoiceServer {
         let mut st = self.state();
         for u in updates {
             if let Some(p) = st.players.get_mut(&u.id) {
-                p.pos = u.pos;
-                p.dimension = u.dimension;
+                p.place(u.pos, u.dimension);
                 p.underwater = u.underwater;
                 p.role = u.role;
             }
@@ -966,44 +971,53 @@ impl Shared {
                     st.mic_frames.push_back(MicFrame { player: sender_id, seq: frame.seq, talk, group: group.is_some(), opus });
                 }
 
-                let recipients: Vec<PlayerId> = st
-                    .players
-                    .iter()
-                    .filter(|(id, l)| {
-                        if **id == sender_id || matches!(l.transport, Transport::Pending) {
-                            return false;
-                        }
-                        if !rules.can_hear(src_role, l.role) {
-                            return false;
-                        }
-                        match group {
-                            Some(g) => l.group == Some(g),
-                            None => {
-                                if l.dimension != src_dim {
-                                    return false;
-                                }
-                                let d = [src_pos[0] - l.pos[0], src_pos[1] - l.pos[1], src_pos[2] - l.pos[2]];
-                                d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= (range as f64) * (range as f64)
+                // Quién la oye, en una sola vuelta. Con multitud, a las zonas donde esta
+                // voz no va por separado le llega en el murmullo; el plan se mira una vez
+                // por zona (unas pocas), no por oyente (cientos).
+                let crowd_check = group.is_none() && !src_priority && !st.crowd_plans.is_empty();
+                let mut zones: Vec<(Cell, bool)> = Vec::new();
+                let mut to_crowd = false;
+                let range2 = (range as f64) * (range as f64);
+                let mut recipients: Vec<PlayerId> = Vec::new();
+                for (id, l) in &st.players {
+                    if *id == sender_id || matches!(l.transport, Transport::Pending) || !rules.can_hear(src_role, l.role) {
+                        continue;
+                    }
+                    match group {
+                        Some(g) => {
+                            if l.group != Some(g) {
+                                continue;
                             }
                         }
-                    })
-                    .map(|(id, _)| *id)
-                    .collect();
-
-                // Multitud: a las zonas donde esta voz no va por separado le llega
-                // en el murmullo.
-                let mut recipients = recipients;
-                if group.is_none() && !src_priority && !st.crowd_plans.is_empty() {
-                    let before = recipients.len();
-                    let (players, plans) = (&st.players, &st.crowd_plans);
-                    recipients.retain(|id| {
-                        let l = &players[id];
-                        plans.get(&Cell::of(l.pos, l.dimension)).is_none_or(|near| near.contains(&sender_id))
-                    });
-                    if recipients.len() < before && src_role == Role::Alive {
-                        let speaker = crowd::Speaker { id: sender_id, pos: src_pos, dim: src_dim, range };
-                        st.crowd_stash.push(speaker, frame.opus.clone(), Instant::now());
+                        None => {
+                            if l.dimension != src_dim {
+                                continue;
+                            }
+                            let d = [src_pos[0] - l.pos[0], src_pos[1] - l.pos[1], src_pos[2] - l.pos[2]];
+                            if d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > range2 {
+                                continue;
+                            }
+                            if crowd_check {
+                                let separate = match zones.iter().find(|(c, _)| *c == l.cell) {
+                                    Some((_, v)) => *v,
+                                    None => {
+                                        let v = st.crowd_plans.get(&l.cell).is_none_or(|near| near.contains(&sender_id));
+                                        zones.push((l.cell, v));
+                                        v
+                                    }
+                                };
+                                if !separate {
+                                    to_crowd = true;
+                                    continue;
+                                }
+                            }
+                        }
                     }
+                    recipients.push(*id);
+                }
+                if to_crowd && src_role == Role::Alive {
+                    let speaker = crowd::Speaker { id: sender_id, pos: src_pos, dim: src_dim, range };
+                    st.crowd_stash.push(speaker, frame.opus.clone(), Instant::now());
                 }
 
                 let now = Instant::now();

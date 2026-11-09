@@ -11,6 +11,7 @@ sección de esa versión como notas de la release.
 - **Guardar no frena la voz**: `ferrovoz-data.txt` se escribe en un hilo propio en vez de con el estado del relé bloqueado (en un disco lento, la voz de todos se paraba un momento al guardar). Al apagar se escribe lo pendiente.
 - **Un fallo no tira la voz entera**: si un paquete raro o un error hace fallar a un hilo del relé, se descarta ese paquete y los demás hilos siguen; antes, el lock quedaba envenenado y se caía la voz de todo el servidor.
 - **Relé más ligero**: descifra fuera del candado del estado y prepara la copia de la trama para cada oyente en los hilos que cifran y envían. Cada paquete cuesta un 15-20 % menos: el caso extremo de 100 personas juntas hablando todas pasa del 89 % al 100 % de voz entregada con menos CPU. Sin cambios para los jugadores ni el protocolo.
+- **Repartir cada trama cuesta la mitad en multitudes**: cada jugador guarda su zona y solo se recalcula al moverse, y quién la oye por separado y quién en el murmullo se decide en la misma vuelta, consultando el plan una vez por zona en vez de una por oyente. Con 500 personas juntas, de 47-75 µs a 23-33 µs por trama: un hilo atiende unas 40 000 por segundo (antes, unas 21 000), de sobra para un evento de 500 con 300 hablando.
 - **Paredes sin picos en eventos grandes**: para decidir a quién calcular paredes ya no se recorren todas las parejas posibles, solo las voces que cada uno oye por separado. Con 500 personas juntas y 300 hablando, esa búsqueda (cada 4 ticks) baja de unos 13 ms a menos de 1 ms.
 
 ## [0.12.0]
