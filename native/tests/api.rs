@@ -20,6 +20,17 @@ fn wait_until(what: &str, mut f: impl FnMut() -> bool) {
     }
 }
 
+/// Espera a que no llegue nada más a la escucha del micro, y lo tira. Lo que quede en
+/// camino de una frase anterior aparecería si no en la medida siguiente: en una máquina
+/// lenta, las últimas tramas tardan en salir del cliente.
+fn drain_mic(server: &VoiceServer) {
+    wait_until("deja de llegar voz al micro", || {
+        server.poll_mic();
+        std::thread::sleep(Duration::from_millis(100));
+        server.poll_mic().is_empty()
+    });
+}
+
 fn sine_frame(n: usize) -> Vec<f32> {
     (0..FRAME_SAMPLES)
         .map(|i| 0.5 * (std::f32::consts::TAU * 300.0 * (n * FRAME_SAMPLES + i) as f32 / SAMPLE_RATE as f32).sin())
@@ -169,11 +180,10 @@ fn plugins_can_listen_to_the_microphone() {
     s.speak(0);
     assert!(s.server.poll_mic().is_empty(), "sin escucha no se copia nada");
 
-    // Que lo que quede en camino de la frase anterior (en modo normal) llegue antes de
-    // escuchar: en una máquina lenta, las últimas tramas tardan en salir del cliente.
     s.clients[0].set_talk_mode(TalkMode::Shout);
-    std::thread::sleep(Duration::from_millis(500));
     s.server.set_mic_tap(true);
+    // Sin lo que quedara en camino de la frase anterior, que era en modo normal.
+    drain_mic(&s.server);
     s.speak(0);
     let frames = s.server.poll_mic();
     assert!(frames.len() >= 30, "llegan las tramas: {}", frames.len());
@@ -192,8 +202,10 @@ fn plugins_can_listen_to_the_microphone() {
         .sum();
     assert!(energy > HEARD, "es la voz: {energy}");
 
-    // Un silenciado no sale.
+    // Un silenciado no sale. Primero el silencio, que corta la copia, y luego se tira lo
+    // que quedara en camino de la frase anterior.
     s.server.set_muted(&id(0), true);
+    drain_mic(&s.server);
     s.speak(0);
     assert!(s.server.poll_mic().is_empty(), "lo silenciado no se copia");
     s.server.set_mic_tap(false);
