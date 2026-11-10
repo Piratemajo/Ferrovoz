@@ -3,7 +3,7 @@
 Formato: una sección `## [versión]` por versión. Al publicar, el CI copia la
 sección de esa versión como notas de la release.
 
-## [Sin publicar]
+## [0.13.0]
 
 - **Los grupos se manejan desde los ajustes (J → Grupos…)**, sin escribir comandos: salen los grupos del servidor con cuántos están dentro, cuáles piden contraseña y cuáles son permanentes, se entra y se sale con un clic, se crea uno escribiendo nombre y contraseña, y el dueño expulsa, fija o borra desde ahí. También muestra quién está en el grupo propio. La pantalla le pide la lista al servidor solo mientras está abierta, así que donde nadie la mire no cuesta nada. Cada botón manda su comando, así que el servidor comprueba y avisa lo mismo que al escribirlo, y un plugin que cancele el evento sigue cancelándolo. Con un servidor anterior a esta versión quedan crear y unirse escribiendo el nombre.
 - **Quilt**: el mismo jar funciona en Quilt, cliente y servidor: en 26.3 con Quilt Loader 0.31 o posterior y Fabric API, y en 1.21.1 con Fabric API o Quilted Fabric API. El log y el informe del benchmark dicen «Quilt» en vez de «Fabric». Para la API, `platform()` sigue devolviendo `"Fabric"`, porque Quilt carga los mods de Fabric y su API. El CI arranca en cada cambio un servidor de verdad en Fabric y en Quilt, de las dos versiones, y comprueba que la voz se pone en marcha.

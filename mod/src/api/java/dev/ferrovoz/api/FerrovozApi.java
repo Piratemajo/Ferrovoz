@@ -52,7 +52,7 @@ public interface FerrovozApi {
         ApiAccess.whenReady(action);
     }
 
-    /** Ferrovoz version, e.g. {@code "0.12.0"}. */
+    /** Ferrovoz version, e.g. {@code "0.13.0"}. */
     String version();
 
     /**
