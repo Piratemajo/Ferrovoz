@@ -1207,6 +1207,62 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientMemberName(
     }
 }
 
+/// Pide al servidor los grupos que hay. La respuesta tarda un viaje de ida y vuelta
+/// y se lee con `clientGroupList`. Un servidor anterior a 0.13 no contesta.
+#[no_mangle]
+pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientRequestGroups(_: JNIEnv, _: JClass, h: jlong) {
+    guard((), || {
+        if let Some(c) = client(h) {
+            c.request_groups();
+        }
+    })
+}
+
+/// `["nombre|miembros|candado(0/1)|permanente(0/1)|propio(0/1)", ...]`, como
+/// `serverListGroups` más el último campo. Vacío si el servidor no la ha mandado.
+#[no_mangle]
+pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientGroupList(mut env: JNIEnv, _: JClass, h: jlong) -> jobjectArray {
+    let items: Vec<String> = guard(Vec::new(), || {
+        client(h)
+            .map(|c| {
+                c.groups()
+                    .0
+                    .into_iter()
+                    .map(|g| format!("{}|{}|{}|{}|{}", g.name, g.members, g.locked as u8, g.persistent as u8, g.mine as u8))
+                    .collect()
+            })
+            .unwrap_or_default()
+    });
+    string_array(&mut env, &items)
+}
+
+/// Miembros del grupo propio: pares (mitad alta, mitad baja) de sus UUID. El nombre lo
+/// pone el mod, de la lista de jugadores o con `clientMemberName`.
+#[no_mangle]
+pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientGroupMembers(env: JNIEnv, _: JClass, h: jlong) -> jlongArray {
+    let v: Vec<jlong> = guard(Vec::new(), || {
+        client(h)
+            .map(|c| {
+                // El grupo de red del proxy tiene prioridad, como en `clientGroupName`
+                // y `clientGroupFlags`: los tres hablan del mismo grupo.
+                let net = c.net_group();
+                let ids: Vec<protocol::PlayerId> = if net.name.is_empty() {
+                    c.groups().1
+                } else {
+                    net.members.into_iter().map(|(id, _)| id).collect()
+                };
+                ids.iter()
+                    .flat_map(|id| {
+                        let (msb, lsb) = protocol::uuid_to_java(id);
+                        [msb, lsb]
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    });
+    long_array(&env, &v)
+}
+
 // ---------------------------------------------------------------------------
 // Reenviador para proxies (Velocity, BungeeCord)
 // ---------------------------------------------------------------------------

@@ -19,7 +19,8 @@
 //! paredes en `walls`, eventos en `events` y el archivo de datos en `storage`.
 
 use crate::protocol::{
-    self, AudioDown, AudioUp, Environment, GroupState, PacketType, PeerStates, PlayerId, PlayerKey, PongInfo, ReplayWindow,
+    self, AudioDown, AudioUp, Environment, GroupEntry, GroupList, GroupState, PacketType, PeerStates, PlayerId, PlayerKey,
+    PongInfo, ReplayWindow,
     TalkMode, CROWD_ID, MAX_PACKET, OCCLUSION_UNKNOWN,
 };
 use crate::channels::{self, Channel, Target};
@@ -86,6 +87,9 @@ const PEER_STATES_EVERY: Duration = Duration::from_secs(1);
 pub(crate) const AUDIO_RATE: f32 = 60.0;
 pub(crate) const AUDIO_BURST: f32 = 100.0;
 const CONTROL_RATE: f32 = 5.0;
+/// Cada cuánto como mucho se contesta a un `GroupsPlease`. La pantalla de ajustes
+/// la pide una vez por segundo; el resto se descarta sin armar la lista.
+const GROUP_LIST_EVERY: Duration = Duration::from_millis(400);
 const CONTROL_BURST: f32 = 20.0;
 /// Paquetes inválidos por segundo tolerados por IP antes de ignorarla.
 const BAD_PACKETS_RATE: f32 = 20.0;
@@ -199,6 +203,8 @@ struct Player {
     tx_counter: u64,
     audio_bucket: TokenBucket,
     control_bucket: TokenBucket,
+    /// Última lista de grupos que se le mandó (ver [`GROUP_LIST_EVERY`]).
+    groups_sent: Instant,
     pos: [f64; 3],
     dimension: i32,
     /// Zona de multitudes de `pos`; se recalcula solo al moverse (ver [`Player::place`]).
@@ -469,6 +475,7 @@ impl VoiceServer {
                     tx_counter: 0,
                     audio_bucket: TokenBucket::new(AUDIO_RATE, AUDIO_BURST),
                     control_bucket: TokenBucket::new(CONTROL_RATE, CONTROL_BURST),
+                    groups_sent: Instant::now() - GROUP_LIST_EVERY,
                     pos: [0.0; 3],
                     dimension: 0,
                     cell: Cell::of([0.0; 3], 0),
@@ -1084,6 +1091,12 @@ impl Shared {
             PacketType::VoiceState => {
                 sender.self_flags = body.first().copied().unwrap_or(0) & (PeerStates::MUTED | PeerStates::DEAFENED);
             }
+            PacketType::GroupsPlease => {
+                if sender.groups_sent.elapsed() >= GROUP_LIST_EVERY {
+                    sender.groups_sent = Instant::now();
+                    st.send_group_list(&sender_id, out);
+                }
+            }
             PacketType::Bye => {
                 // Solo desde su dirección o su túnel (además va cifrado con su clave).
                 let from_ok = match (&sender.transport, source) {
@@ -1107,7 +1120,8 @@ impl Shared {
             | PacketType::GroupState
             | PacketType::RelayAudio
             | PacketType::RelayGroup
-            | PacketType::PeerStates => return Err(()),
+            | PacketType::PeerStates
+            | PacketType::GroupList => return Err(()),
         }
         Ok(())
     }

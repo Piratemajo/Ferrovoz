@@ -17,7 +17,8 @@ use crate::denoise::Denoiser;
 use crate::micproc::MicProcessor;
 use crate::jitter::{JitterBuffer, Pop};
 use crate::protocol::{
-    self, AudioDown, AudioUp, Environment, GroupState, NetGroupState, PacketType, PeerStates, PlayerId, PlayerKey, PongInfo, ReplayWindow,
+    self, AudioDown, AudioUp, Environment, GroupEntry, GroupList, GroupState, NetGroupState, PacketType, PeerStates, PlayerId,
+    PlayerKey, PongInfo, ReplayWindow,
     TalkMode, FRAME_SAMPLES, MAX_PACKET, OCCLUSION_UNKNOWN, SAMPLE_RATE,
 };
 use crate::reverb::{EarlyReflections, Reflection, Reverb};
@@ -215,6 +216,19 @@ struct Acoustics {
     reflections: Vec<Reflection>,
 }
 
+/// Grupos del servidor: la última lista entera y la que se está juntando, porque
+/// viene en trozos (ver [`GroupList`]).
+#[derive(Default)]
+struct Groups {
+    list: Vec<GroupEntry>,
+    /// Miembros del grupo propio, por UUID (el nombre lo pone el mod).
+    members: Vec<PlayerId>,
+    staging: Vec<GroupEntry>,
+    staging_members: Vec<PlayerId>,
+    /// Llegó el primer trozo del envío en curso.
+    started: bool,
+}
+
 struct Mixer {
     speakers: HashMap<PlayerId, Speaker>,
     /// Volumen por jugador (1.0 normal, 0.0 silenciado).
@@ -300,6 +314,8 @@ pub(crate) struct Shared {
     group: Mutex<GroupState>,
     /// Grupo de red del proxy (nombre vacío = ninguno).
     net_group: Mutex<NetGroupState>,
+    /// Grupos del servidor para la pantalla de ajustes.
+    groups: Mutex<Groups>,
     /// Grabación de repetición activa: se guardan las tramas propias y recibidas.
     recording: AtomicBool,
     recorded: Mutex<VecDeque<Vec<u8>>>,
@@ -402,6 +418,7 @@ impl VoiceClient {
             my_env: AtomicU32::new(0),
             group: Mutex::new(GroupState::default()),
             net_group: Mutex::new(NetGroupState::default()),
+            groups: Mutex::new(Groups::default()),
             recording: AtomicBool::new(false),
             recorded: Mutex::new(VecDeque::new()),
             peers: Mutex::new(None),
@@ -664,6 +681,19 @@ impl VoiceClient {
         }
     }
 
+    /// Pide al servidor los grupos que hay. Lo llama la pantalla de ajustes mientras
+    /// está abierta; la respuesta se lee con [`Self::groups`]. Servidores anteriores a
+    /// 0.13 no contestan, así que la lista se queda vacía.
+    pub fn request_groups(&self) {
+        self.shared.send(self.shared.seal(PacketType::GroupsPlease, &[]));
+    }
+
+    /// Lo último que mandó el servidor: los grupos y los miembros del propio.
+    pub fn groups(&self) -> (Vec<GroupEntry>, Vec<PlayerId>) {
+        let g = lock(&self.shared.groups);
+        (g.list.clone(), g.members.clone())
+    }
+
     /// Grupo de red (nombre vacío = ninguno).
     pub fn net_group(&self) -> NetGroupState {
         lock(&self.shared.net_group).clone()
@@ -911,6 +941,26 @@ impl Shared {
                     map.retain(|_, (_, t)| now.duration_since(*t) < PEER_STATE_TTL);
                     for (id, flags) in states.entries {
                         map.insert(id, (flags, now));
+                    }
+                }
+            }
+            PacketType::GroupList => {
+                if let Ok(part) = GroupList::decode(&body) {
+                    let mut g = lock(&self.groups);
+                    if part.first {
+                        g.staging.clear();
+                        g.staging_members = part.members;
+                        g.started = true;
+                    }
+                    // Sin el primer trozo no se sabe de qué envío son los demás: se tiran
+                    // y se espera al siguiente, que llega al pedirla otra vez.
+                    if g.started {
+                        g.staging.extend(part.groups);
+                        if part.last {
+                            g.list = std::mem::take(&mut g.staging);
+                            g.members = std::mem::take(&mut g.staging_members);
+                            g.started = false;
+                        }
                     }
                 }
             }

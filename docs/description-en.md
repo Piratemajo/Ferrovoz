@@ -31,6 +31,7 @@ It runs as a mod on **Fabric, NeoForge and Forge**, as a plugin on **Paper, Purp
 ### Groups
 - Create a group with an optional password: members hear each other **at any distance and in any dimension**, like a radio.
 - Groups have an **owner** who can kick members, pin the group or delete it.
+- Create and manage groups from **Settings (J → Groups…)**: see what there is, join, leave, kick, pin or delete, without typing commands.
 - **Permanent groups** survive restarts, and their members rejoin automatically.
 - Chat notices when someone joins or leaves, and your group is shown in the HUD.
 

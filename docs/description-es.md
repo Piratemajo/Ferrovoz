@@ -31,6 +31,7 @@ Funciona como mod de **Fabric, NeoForge y Forge**, como plugin de **Paper, Purpu
 ### Grupos
 - Crea un grupo, con contraseña si quieres: sus miembros se oyen **a cualquier distancia y en cualquier dimensión**, como una radio.
 - Los grupos tienen **dueño**, que puede expulsar, fijar el grupo o borrarlo.
+- Crea y gestiona los grupos desde **Ajustes (J → Grupos…)**: ver los que hay, entrar, salir, expulsar, fijar o borrar, sin escribir comandos.
 - Los **grupos permanentes** sobreviven a los reinicios y sus miembros vuelven a ellos solos.
 - Avisos en el chat cuando alguien entra o sale, y tu grupo se ve en el HUD.
 

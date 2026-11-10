@@ -396,6 +396,19 @@ public final class FerrovozNative {
 
     /** Nombre de un miembro del grupo de red (puede estar en otro servidor), o null. */
     public static native String clientMemberName(long handle, long uuidMsb, long uuidLsb);
+
+    /**
+     * Pide al servidor los grupos que hay. La respuesta tarda un viaje de ida y vuelta
+     * y se lee con {@link #clientGroupList}; hay que volver a pedirla para verla al día.
+     * Los servidores anteriores a 0.13 no contestan, así que la lista queda vacía.
+     */
+    public static native void clientRequestGroups(long handle);
+
+    /** {@code ["nombre|miembros|candado|permanente|propio", ...]}, los tres últimos 0 o 1. */
+    public static native String[] clientGroupList(long handle);
+
+    /** UUID de los miembros del grupo propio, en pares (mitad alta, mitad baja). */
+    public static native long[] clientGroupMembers(long handle);
     /** Bits: 1 = dueño, 2 = permanente, 4 = grupo de red. */
     public static native int clientGroupFlags(long handle);
 }

@@ -160,16 +160,21 @@ public final class VoiceSettingsScreen extends Screen {
         }
         y += 6;
 
-        // Jugadores, teclas y salir
-        int third = (WIDTH - 8) / 3;
+        // Jugadores, grupos, teclas y salir
+        int quarter = (WIDTH - 12) / 4;
+        boolean inGame = this.minecraft.getConnection() != null;
         Button players = Button.builder(Component.translatable("ferrovoz.settings.players"),
-                b -> this.minecraft.gui.setScreen(new PlayerVolumeScreen(this))).bounds(x, y, third, 20).build();
-        players.active = this.minecraft.getConnection() != null;
+                b -> this.minecraft.gui.setScreen(new PlayerVolumeScreen(this))).bounds(x, y, quarter, 20).build();
+        players.active = inGame;
         addRenderableWidget(players);
+        Button groups = Button.builder(Component.translatable("ferrovoz.settings.groups"),
+                b -> this.minecraft.gui.setScreen(new GroupsScreen(this))).bounds(x + quarter + 4, y, quarter, 20).build();
+        groups.active = inGame;
+        addRenderableWidget(groups);
         addRenderableWidget(Button.builder(Component.translatable("ferrovoz.settings.keys"),
-                b -> this.minecraft.gui.setScreen(new KeysScreen(this))).bounds(x + third + 4, y, third, 20).build());
+                b -> this.minecraft.gui.setScreen(new KeysScreen(this))).bounds(x + 2 * (quarter + 4), y, quarter, 20).build());
         addRenderableWidget(Button.builder(Component.translatable("gui.done"), b -> onClose())
-                .bounds(x + 2 * (third + 4), y, WIDTH - 2 * (third + 4), 20).build());
+                .bounds(x + 3 * (quarter + 4), y, WIDTH - 3 * (quarter + 4), 20).build());
         y += ROW;
         // Desactivar la voz del todo (se guarda para todos los servidores)
         addRenderableWidget(cycle(x, y, WIDTH, () -> Component.translatable("ferrovoz.settings.voice", onOff(!config.voiceDisabled)),

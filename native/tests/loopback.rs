@@ -594,6 +594,58 @@ fn client_learns_its_group_for_the_hud() {
     wait_until("el que sale ya no tiene grupo", || s.clients[0].group_state().name.is_empty());
 }
 
+/// Lo que necesita la pantalla de ajustes para pintar los grupos y unirse a uno.
+#[test]
+fn client_can_ask_the_server_which_groups_there_are() {
+    let s = Scene::new(&[(0.0, 1), (3.0, 1)]);
+    // Pedirla antes de que haya grupos: la respuesta llega vacía, no se queda colgada.
+    s.clients[0].request_groups();
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(s.clients[0].groups().0.is_empty());
+
+    s.server.create_group(&s.ids[0], "Escenario", Some("clave")).unwrap();
+    s.server.create_group(&s.ids[1], "Público", None).unwrap();
+    s.server.set_group_persistent_by_name("público", true).unwrap();
+
+    // Como la pantalla: se pide en cada vuelta, porque el servidor contesta como mucho
+    // cada 400 ms y descarta las peticiones seguidas.
+    let groups = |who: usize| {
+        let mut got = Vec::new();
+        wait_until("lista de grupos recibida", || {
+            s.clients[who].request_groups();
+            got = s.clients[who].groups().0;
+            got.len() == 2
+        });
+        got
+    };
+
+    // Ordenados por nombre, con su contraseña, permanencia y miembros.
+    let mine = groups(0);
+    assert_eq!(mine.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(), ["Escenario", "Público"]);
+    assert_eq!((mine[0].locked, mine[0].persistent, mine[0].members, mine[0].mine), (true, false, 1, true));
+    assert_eq!((mine[1].locked, mine[1].persistent, mine[1].members, mine[1].mine), (false, true, 1, false));
+    // El mismo servidor, visto por el otro: solo cambia cuál es el suyo.
+    let theirs = groups(1);
+    assert_eq!(theirs.iter().map(|g| g.mine).collect::<Vec<_>>(), [false, true]);
+
+    // Los miembros del grupo propio, para poder expulsar desde la pantalla.
+    s.server.force_join_group(&s.ids[1], "escenario").unwrap();
+    wait_until("miembros del grupo propio", || {
+        s.clients[0].request_groups();
+        let (list, members) = s.clients[0].groups();
+        members.len() == 2 && list.iter().any(|g| g.mine && g.members == 2)
+    });
+    let (_, members) = s.clients[0].groups();
+    assert!(members.contains(&s.ids[0]) && members.contains(&s.ids[1]), "{members:?}");
+
+    // Al borrarse un grupo desaparece de la lista.
+    s.server.delete_group(&s.ids[1], "público", false).unwrap();
+    wait_until("grupo borrado fuera de la lista", || {
+        s.clients[0].request_groups();
+        s.clients[0].groups().0.len() == 1
+    });
+}
+
 #[test]
 fn speaker_in_a_cave_echoes_even_if_listener_is_outside() {
     let tail_heard = |speaker_wet: f32| {

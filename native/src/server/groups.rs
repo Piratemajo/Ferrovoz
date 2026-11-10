@@ -274,6 +274,51 @@ impl State {
         }
     }
 
+    /// Lo que todos ven igual de la lista de grupos, ordenado por nombre. El `mine` y
+    /// los miembros del grupo propio se ponen por jugador en [`Self::send_group_list`].
+    pub(super) fn group_directory(&self) -> Vec<(u32, GroupEntry)> {
+        let mut counts: HashMap<u32, u16> = HashMap::new();
+        for p in self.players.values() {
+            if let Some(g) = p.group {
+                *counts.entry(g).or_default() = counts.get(&g).copied().unwrap_or(0).saturating_add(1);
+            }
+        }
+        let mut out: Vec<(u32, GroupEntry)> = self
+            .groups
+            .iter()
+            .map(|(id, g)| {
+                let entry = GroupEntry {
+                    name: g.name.clone(),
+                    members: counts.get(id).copied().unwrap_or(0),
+                    locked: g.password.is_some(),
+                    persistent: g.persistent,
+                    mine: false,
+                };
+                (*id, entry)
+            })
+            .collect();
+        out.sort_by_key(|g| g.1.name.to_lowercase());
+        out.truncate(GroupList::MAX_GROUPS);
+        out
+    }
+
+    /// Manda la lista de grupos a quien la ha pedido.
+    pub(super) fn send_group_list(&mut self, player: &PlayerId, out: &mut Outgoing) {
+        let dir = self.group_directory();
+        let mine = self.players.get(player).and_then(|p| p.group);
+        let members = mine.map(|g| self.members_of(g)).unwrap_or_default();
+        let groups: Vec<GroupEntry> =
+            dir.into_iter().map(|(g, e)| GroupEntry { mine: Some(g) == mine, ..e }).collect();
+        let bodies = GroupList::chunks(&members, &groups);
+        let Some(p) = self.players.get_mut(player) else { return };
+        // Contador local; las estadísticas aquí dan igual.
+        let stats = ServerStats::default();
+        for body in &bodies {
+            let pkt = p.seal(PacketType::GroupList, body);
+            deliver(&stats, p, pkt, out);
+        }
+    }
+
     pub(super) fn send_group_state(&mut self, player: &PlayerId, out: &mut Outgoing) {
         let state = match self.players.get(player).and_then(|p| p.group).and_then(|g| self.groups.get(&g)) {
             Some(g) => GroupState { name: g.name.clone(), owner: g.owner == Some(*player), persistent: g.persistent },

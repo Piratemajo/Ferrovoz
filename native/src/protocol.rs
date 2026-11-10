@@ -71,6 +71,13 @@ pub enum PacketType {
     VoiceState = 10,
     /// S -> C: estado de voz de los jugadores (ver [`PeerStates`]).
     PeerStates = 11,
+    /// S -> C: grupos del servidor y miembros del propio (ver [`GroupList`]).
+    /// Servidores anteriores a 0.13 no lo mandan y clientes anteriores lo descartan.
+    GroupList = 12,
+    /// C -> S: "mándame la lista de grupos", sin cuerpo. Lo pide la pantalla de ajustes
+    /// mientras está abierta, así que un servidor sin nadie mirándola no gasta nada.
+    /// Servidores anteriores a 0.13 lo descartan.
+    GroupsPlease = 13,
 }
 
 impl PacketType {
@@ -87,13 +94,15 @@ impl PacketType {
             9 => Self::RelayGroup,
             10 => Self::VoiceState,
             11 => Self::PeerStates,
+            12 => Self::GroupList,
+            13 => Self::GroupsPlease,
             _ => return None,
         })
     }
 
     /// Paquetes con el UUID del remitente en claro tras la cabecera.
     fn carries_sender_id(self) -> bool {
-        matches!(self, Self::Hello | Self::AudioUp | Self::Ping | Self::Bye | Self::VoiceState)
+        matches!(self, Self::Hello | Self::AudioUp | Self::Ping | Self::Bye | Self::VoiceState | Self::GroupsPlease)
     }
 
     /// Dirección del tipo de paquete.
@@ -287,6 +296,120 @@ impl NetGroupState {
     }
 }
 
+/// Un grupo tal como se pinta en la lista: lo que hace falta para mostrarlo y para
+/// saber si hay que pedir contraseña antes de unirse.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GroupEntry {
+    pub name: String,
+    /// Miembros conectados (los que caben en `u16`; nadie llega ahí).
+    pub members: u16,
+    /// Tiene contraseña.
+    pub locked: bool,
+    pub persistent: bool,
+    /// Es el grupo de quien recibe el paquete.
+    pub mine: bool,
+}
+
+/// Grupos del servidor, para la pantalla de ajustes, más los miembros del grupo
+/// propio (por UUID: el nombre lo saca el cliente de la lista de jugadores).
+///
+/// La lista va en trozos porque no tiene que caber en un paquete: el primero lleva
+/// los miembros y el último cierra la lista. El cliente va juntando los trozos y
+/// solo cambia lo que muestra al recibir el último, así que un trozo perdido deja la
+/// lista anterior en su sitio hasta el siguiente envío.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GroupList {
+    pub first: bool,
+    pub last: bool,
+    /// Miembros del grupo propio. Solo en el primer trozo.
+    pub members: Vec<PlayerId>,
+    pub groups: Vec<GroupEntry>,
+}
+
+impl GroupList {
+    const FIRST: u8 = 1;
+    const LAST: u8 = 2;
+    const LOCKED: u8 = 1;
+    const PERSISTENT: u8 = 2;
+    const MINE: u8 = 4;
+
+    /// Miembros del grupo propio que se mandan.
+    pub const MAX_MEMBERS: usize = 32;
+    /// Grupos que se mandan a la pantalla. Con más, `/voz grupo lista` los da todos.
+    pub const MAX_GROUPS: usize = 64;
+    /// Tamaño al que se corta un trozo, con sitio de sobra para cabecera y firma.
+    const BUDGET: usize = 1100;
+
+    pub fn encode(&self) -> Vec<u8> {
+        let mut v = vec![(if self.first { Self::FIRST } else { 0 }) | (if self.last { Self::LAST } else { 0 })];
+        let members = &self.members[..self.members.len().min(Self::MAX_MEMBERS)];
+        v.push(members.len() as u8);
+        for id in members {
+            v.extend_from_slice(id);
+        }
+        v.push(self.groups.len().min(255) as u8);
+        for g in self.groups.iter().take(255) {
+            push_str(&mut v, &g.name);
+            v.push(
+                (if g.locked { Self::LOCKED } else { 0 })
+                    | (if g.persistent { Self::PERSISTENT } else { 0 })
+                    | (if g.mine { Self::MINE } else { 0 }),
+            );
+            v.extend_from_slice(&g.members.to_be_bytes());
+        }
+        v
+    }
+
+    pub fn decode(b: &[u8]) -> Result<Self, ProtocolError> {
+        let mut r = Reader(b);
+        let flags = r.u8()?;
+        let n = r.u8()? as usize;
+        let mut members = Vec::with_capacity(n.min(Self::MAX_MEMBERS));
+        for _ in 0..n {
+            let mut id = [0u8; UUID_LEN];
+            id.copy_from_slice(r.take(UUID_LEN)?);
+            members.push(id);
+        }
+        let n = r.u8()? as usize;
+        let mut groups = Vec::with_capacity(n.min(Self::MAX_GROUPS));
+        for _ in 0..n {
+            let name = r.str()?;
+            let f = r.u8()?;
+            groups.push(GroupEntry {
+                name,
+                members: r.u16()?,
+                locked: f & Self::LOCKED != 0,
+                persistent: f & Self::PERSISTENT != 0,
+                mine: f & Self::MINE != 0,
+            });
+        }
+        Ok(Self { first: flags & Self::FIRST != 0, last: flags & Self::LAST != 0, members, groups })
+    }
+
+    /// Parte la lista en los trozos que caben en un paquete. Siempre devuelve al menos
+    /// uno, para que el cliente pueda vaciar la lista cuando no queda ningún grupo.
+    pub fn chunks(members: &[PlayerId], groups: &[GroupEntry]) -> Vec<Vec<u8>> {
+        let groups = &groups[..groups.len().min(Self::MAX_GROUPS)];
+        let mut out = Vec::new();
+        let mut part = Self { first: true, last: false, members: members.to_vec(), groups: Vec::new() };
+        let mut size = part.encode().len();
+        for g in groups {
+            // 1 byte de longitud + nombre + 1 de banderas + 2 de miembros.
+            let cost = 1 + g.name.len().min(255) + 3;
+            if !part.groups.is_empty() && size + cost > Self::BUDGET {
+                // `take` deja un trozo intermedio: ni primero ni último, y sin miembros.
+                out.push(std::mem::take(&mut part).encode());
+                size = part.encode().len();
+            }
+            part.groups.push(g.clone());
+            size += cost;
+        }
+        part.last = true;
+        out.push(part.encode());
+        out
+    }
+}
+
 /// Estado de voz de los jugadores. Quien no aparece no tiene el mod (o es incompatible).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PeerStates {
@@ -351,6 +474,10 @@ impl<'a> Reader<'a> {
 
     fn u8(&mut self) -> Result<u8, ProtocolError> {
         Ok(self.take(1)?[0])
+    }
+
+    fn u16(&mut self) -> Result<u16, ProtocolError> {
+        Ok(u16::from_be_bytes(self.take(2)?.try_into().unwrap()))
     }
 
     fn str(&mut self) -> Result<String, ProtocolError> {
@@ -842,4 +969,54 @@ mod tests {
         assert_eq!(AudioDown::for_listener(&template, other.rel, other.occlusion), other.encode());
     }
 
+    fn entry(name: &str, members: u16) -> GroupEntry {
+        GroupEntry { name: name.into(), members, locked: true, persistent: false, mine: name == "Mío" }
+    }
+
+    #[test]
+    fn a_group_list_survives_a_round_trip() {
+        let list = GroupList {
+            first: true,
+            last: true,
+            members: vec![[1; 16], [2; 16]],
+            groups: vec![entry("Mío", 2), GroupEntry { name: "Ñandú ★".into(), members: 500, locked: false, persistent: true, mine: false }],
+        };
+        assert_eq!(GroupList::decode(&list.encode()).unwrap(), list);
+    }
+
+    #[test]
+    fn a_long_group_list_is_split_into_packets() {
+        let groups: Vec<GroupEntry> = (0..GroupList::MAX_GROUPS).map(|i| entry(&format!("grupo largo número {i:03}"), i as u16)).collect();
+        let parts = GroupList::chunks(&[[9; 16]], &groups);
+        assert!(parts.len() > 1, "una lista así no cabe en un paquete");
+        let mut seen = Vec::new();
+        for (i, raw) in parts.iter().enumerate() {
+            assert!(raw.len() <= MAX_PACKET - 100, "trozo de {} bytes", raw.len());
+            let part = GroupList::decode(raw).unwrap();
+            assert_eq!(part.first, i == 0);
+            assert_eq!(part.last, i == parts.len() - 1);
+            // Los miembros van solo en el primero, para no repetirlos en cada trozo.
+            assert_eq!(part.members, if i == 0 { vec![[9; 16]] } else { vec![] });
+            assert!(!part.groups.is_empty());
+            seen.extend(part.groups);
+        }
+        assert_eq!(seen, groups);
+    }
+
+    #[test]
+    fn an_empty_group_list_is_still_one_packet() {
+        // Hace falta para que el cliente sepa que ya no queda ningún grupo.
+        let parts = GroupList::chunks(&[], &[]);
+        assert_eq!(parts.len(), 1);
+        let only = GroupList::decode(&parts[0]).unwrap();
+        assert!(only.first && only.last && only.groups.is_empty());
+    }
+
+    #[test]
+    fn a_truncated_group_list_is_rejected() {
+        let raw = GroupList { first: true, last: true, members: vec![[3; 16]], groups: vec![entry("Radio", 1)] }.encode();
+        for n in 0..raw.len() {
+            assert!(GroupList::decode(&raw[..n]).is_err(), "aceptados {n} de {} bytes", raw.len());
+        }
+    }
 }
