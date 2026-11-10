@@ -7,8 +7,6 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.Style;
-import net.minecraft.util.FormattedCharSequence;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -216,9 +214,9 @@ final class GroupsScreen extends Screen {
                 name.setMaxLength(24);
                 password = new EditBox(this.font, x + half + 4, FIELDS_Y, half, 20,
                         Component.translatable("ferrovoz.groups.password"));
+                // La contraseña se ve mientras se escribe: el EditBox de Minecraft no tiene
+                // forma de taparla que sirva en las dos versiones. Se borra al usarla.
                 password.setMaxLength(32);
-                // La contraseña no se ve escrita; va en el comando, igual que a mano.
-                password.setFormatter((s, offset) -> FormattedCharSequence.forward("*".repeat(s.length()), Style.EMPTY));
             }
             name.setPosition(x, FIELDS_Y);
             password.setPosition(x + half + 4, FIELDS_Y);
