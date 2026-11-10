@@ -124,7 +124,7 @@ final class GroupsScreen extends Screen {
     private String nameOf(UUID id) {
         if (this.minecraft.getConnection() == null) return null;
         PlayerInfo info = this.minecraft.getConnection().getPlayerInfo(id);
-        return info == null ? null : info.getProfile().name();
+        return info == null ? null : info.getProfile().getName();
     }
 
     private static String text(Member m) {
