@@ -54,49 +54,76 @@ impl Crowd {
         Self { server, listener, talkers }
     }
 
-    /// Hablan todos 1,5 s. Devuelve a quién oye por separado el oyente, si le llega el
-    /// murmullo y la energía que recibe, mirando durante la segunda mitad (con el
-    /// reparto ya hecho) y no en un solo instante: en una máquina lenta, un parón del
-    /// hilo que mezcla justo al final haría creer que no hay murmullo.
-    fn talk(&self) -> (HashSet<[u8; 16]>, bool, f32) {
+    /// Hablan todos a la vez y el oyente mezcla. Primero espera a que el reparto esté
+    /// hecho (`settled`, con el número de voces separadas y si llega el murmullo) y
+    /// luego mira 600 ms: a quién oye por separado, si le llega el murmullo y cuánta
+    /// energía recibe.
+    ///
+    /// No vale mirar en un solo instante, porque una trama perdida haría creer que
+    /// alguien no está; ni desde que empiezan a hablar, porque hasta que el reparto no
+    /// está hecho llegan todas las voces por separado, y cuánto tarda eso depende de la
+    /// máquina (aquí ~350 ms, en una cargada bastante más).
+    fn talk(&self, settled: impl Fn(usize, bool) -> bool) -> (HashSet<[u8; 16]>, bool, f32) {
         for t in &self.talkers {
             t.set_push_to_talk(true);
         }
         // Solo mezcla el oyente: los que hablan no necesitan oír nada, y mezclar 31
         // clientes en este hilo no llega a tiempo real en una máquina lenta.
         let mut out = vec![0f32; FRAME_SAMPLES * 2];
+        let start = Instant::now();
+        let mut n = 0u32;
+
+        // Hablando, hasta que el reparto esté hecho.
+        let mut ready = false;
+        while n < 250 {
+            self.frame(n, &mut out, start);
+            n += 1;
+            if settled(self.listener.speaking_players().len(), self.listener.hearing_crowd()) {
+                ready = true;
+                break;
+            }
+        }
+        let separate = self.listener.speaking_players().len();
+        assert!(ready, "el reparto no se hizo en 5 s: {separate} voces separadas");
+
+        // Y ya midiendo.
         let mut energy = 0f32;
         let mut heard: HashSet<[u8; 16]> = HashSet::new();
         let mut crowd = false;
-        let start = Instant::now();
-        for n in 0..75u32 {
-            for (k, t) in self.talkers.iter().enumerate() {
-                t.push_capture(&sine_frame(n as usize, 200.0 + 20.0 * k as f32));
-            }
-            // A ritmo de reloj: si una vuelta se retrasa, la siguiente no espera.
-            let next = start + Duration::from_millis(20) * (n + 1);
-            if let Some(wait) = next.checked_duration_since(Instant::now()) {
-                std::thread::sleep(wait);
-            }
-            self.listener.render(&mut out);
-            if n > 40 {
-                energy += out.iter().map(|s| s * s).sum::<f32>();
-                heard.extend(self.listener.speaking_players().into_iter().map(|(id, _)| id));
-                crowd |= self.listener.hearing_crowd();
-            }
+        for _ in 0..30 {
+            self.frame(n, &mut out, start);
+            n += 1;
+            energy += out.iter().map(|s| s * s).sum::<f32>();
+            heard.extend(self.listener.speaking_players().into_iter().map(|(id, _)| id));
+            crowd |= self.listener.hearing_crowd();
         }
+
         for t in &self.talkers {
             t.set_push_to_talk(false);
         }
         std::thread::sleep(Duration::from_millis(600));
         (heard, crowd, energy)
     }
+
+    /// Una trama de 20 ms: hablan todos y el oyente mezcla. A ritmo de reloj, así que si
+    /// una vuelta se retrasa la siguiente no espera.
+    fn frame(&self, n: u32, out: &mut [f32], start: Instant) {
+        for (k, t) in self.talkers.iter().enumerate() {
+            t.push_capture(&sine_frame(n as usize, 200.0 + 20.0 * k as f32));
+        }
+        let next = start + Duration::from_millis(20) * (n + 1);
+        if let Some(wait) = next.checked_duration_since(Instant::now()) {
+            std::thread::sleep(wait);
+        }
+        self.listener.render(out);
+    }
 }
 
 #[test]
 fn a_crowd_sends_the_nearest_voices_and_mixes_the_rest() {
     let c = Crowd::new(24);
-    let (heard, crowd, energy) = c.talk();
+    // Hecho = ya no llegan más de 24 por separado y suena el murmullo.
+    let (heard, crowd, energy) = c.talk(|separate, crowd| separate <= 24 && crowd);
     assert!(crowd, "con 30 voces y límite 24 debe llegar el murmullo");
     assert!(energy > 1.0, "se oye algo");
     assert!(heard.len() <= 24, "como mucho 24 por separado, llegan {}", heard.len());
@@ -113,7 +140,8 @@ fn the_event_host_is_always_heard_separately() {
     let c = Crowd::new(24);
     // El más lejano es el anfitrión.
     c.server.set_priority(&id(TALKERS), true);
-    let (heard, crowd, _) = c.talk();
+    // El anfitrión no cuenta para el límite, así que lo estable son 24 y él.
+    let (heard, crowd, _) = c.talk(|separate, crowd| separate <= 25 && crowd);
     assert!(crowd, "con 30 voces y límite 24 sigue habiendo murmullo");
     assert!(heard.contains(&id(TALKERS)), "el anfitrión va siempre por separado");
     // El anfitrión no cuenta para el límite: las 24 más cercanas y él.
@@ -123,7 +151,8 @@ fn the_event_host_is_always_heard_separately() {
 #[test]
 fn without_limit_everyone_goes_separately() {
     let c = Crowd::new(0);
-    let (heard, crowd, _) = c.talk();
+    // Sin límite, hecho = llegan todas y no hay murmullo.
+    let (heard, crowd, _) = c.talk(|separate, crowd| separate == TALKERS && !crowd);
     assert!(!crowd, "sin límite no hay murmullo");
     assert_eq!(heard.len(), TALKERS, "llegan todos por separado");
 }
@@ -131,7 +160,8 @@ fn without_limit_everyone_goes_separately() {
 #[test]
 fn few_voices_do_not_trigger_the_crowd() {
     let c = Crowd::new(40);
-    let (heard, crowd, _) = c.talk();
+    // Con el límite por encima del número de voces, lo estable es que lleguen todas.
+    let (heard, crowd, _) = c.talk(|separate, crowd| separate == TALKERS && !crowd);
     assert!(!crowd, "30 voces con límite 40: no hay multitud");
     assert_eq!(heard.len(), TALKERS);
 }
