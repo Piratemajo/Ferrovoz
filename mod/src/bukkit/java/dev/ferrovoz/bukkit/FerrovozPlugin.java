@@ -80,7 +80,7 @@ public final class FerrovozPlugin extends JavaPlugin implements Listener {
             getLogger().warning("Could not hide group passwords from the console log: " + e);
         }
         // /voz responde aunque el relé no esté en marcha.
-        BukkitVoiceCommands handler = new BukkitVoiceCommands(() -> server, () -> config, online, this::reloadConfig);
+        BukkitVoiceCommands handler = new BukkitVoiceCommands(() -> server, () -> config, online, this::reloadVoiceConfig);
         PluginCommand voz = getCommand("voz");
         if (voz != null) {
             voz.setExecutor(handler);
@@ -175,8 +175,11 @@ public final class FerrovozPlugin extends JavaPlugin implements Listener {
     /**
      * Relee {@code ferrovoz.properties} y deja puesto lo que valga sin reiniciar. El
      * archivo manda: lo que un plugin hubiera cambiado por la API vuelve a lo que diga.
+     *
+     * <p>No se llama {@code reloadConfig}: ese nombre es de {@link org.bukkit.plugin.Plugin},
+     * que recarga el {@code config.yml} del plugin, y Ferrovoz no usa ese archivo.
      */
-    private VoiceCommands.Reload reloadConfig() {
+    private VoiceCommands.Reload reloadVoiceConfig() {
         if (server == 0 || configFile == null) return VoiceCommands.Reload.unsupported();
         FerrovozConfig fresh = FerrovozConfig.load(configFile);
         java.util.List<String> live = fresh.liveChanges(config);
