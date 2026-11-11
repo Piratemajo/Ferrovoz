@@ -14,7 +14,7 @@ Funciona como mod de **Fabric, NeoForge y Forge**, como plugin de **Paper, Purpu
 - **Susurrar y gritar**: susurra (8 bloques) o grita (96 bloques) además de hablar normal (48 bloques). Todos los alcances se pueden cambiar.
 - **Las paredes tapan la voz**: los bloques sólidos entre medias hacen que suene más baja y apagada. El servidor también lo calcula, incluso para jugadores fuera de tu distancia de renderizado.
 - **El sonido rodea**: si hay una puerta abierta, una ventana o una esquina, la voz llega por ahí, más clara y **desde el hueco**. Las puertas cerradas tapan; abiertas, dejan pasar.
-- **Eco según la forma del sitio**: cada cueva y sala suena distinta según su tamaño y sus materiales (la piedra resuena, la lana apaga), con los primeros ecos llegando de las paredes cercanas. Y al hablar dentro **oyes tu propio eco**.
+- **Eco según la forma del sitio**: cada cueva y sala suena distinta según su tamaño y sus materiales (la piedra resuena, la lana apaga), con los primeros ecos llegando de las paredes cercanas y con el color de lo que los devuelve. De cerca se oye la voz y de lejos se oye la sala, el aire se come los agudos con la distancia y cambiar de sitio no da un salto. Y al hablar dentro **oyes tu propio eco**.
 - **Voz bajo el agua**: con la cabeza sumergida (la tuya o la de quien habla) la voz suena tapada y hueca, con una ondulación suave y burbujas.
 - **Indicadores sobre la cabeza**: una nota musical (♪) sobre quien habla, y se ve quién tiene el micro silenciado, quién está ensordecido y quién va sin voz.
 
@@ -46,6 +46,7 @@ Funciona como mod de **Fabric, NeoForge y Forge**, como plugin de **Paper, Purpu
 
 ### Para los dueños de servidores
 - **Moderación**: silencia jugadores en el chat de voz. Los silencios se guardan y se mantienen tras reiniciar.
+- **`/voz recargar`**: cambia alcances, límite de voces, eco o reglas de espectadores en el archivo y aplícalo sin reiniciar el servidor.
 - **Espectadores y muertos**: por defecto, a los espectadores no se les oye desde la partida (hablan entre ellos y oyen a los que juegan). Se puede cambiar: que se les oiga, que solo escuchen… (`spectators` y `dead`).
 - **Permisos** compatibles con **LuckPerms** e iguales en todas las plataformas:
 

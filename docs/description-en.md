@@ -14,7 +14,7 @@ It runs as a mod on **Fabric, NeoForge and Forge**, as a plugin on **Paper, Purp
 - **Whisper and shout**: whisper (8 blocks) or shout (96 blocks) besides normal talking (48 blocks). All ranges are configurable.
 - **Walls muffle voices**: solid blocks between you and the speaker make the voice quieter and duller. The server works this out too, even for players outside your render distance.
 - **Sound goes around walls**: through an open door, a window or around a corner, the voice reaches you clearer and **from the opening**. Closed doors muffle; open ones let sound through.
-- **Echo shaped by the place**: every cave and room sounds different depending on its size and materials (stone rings, wool deadens), with early reflections coming from nearby walls. You also **hear your own echo** when you talk inside.
+- **Echo shaped by the place**: every cave and room sounds different depending on its size and materials (stone rings, wool deadens), with early reflections coming from nearby walls and carrying the colour of whatever bounced them back. Close up you hear the voice, far away you hear the room, the air eats the high end with distance, and moving from one place to another slides instead of jumping. You also **hear your own echo** when you talk inside.
 - **Underwater voice**: with your head (or theirs) underwater, voices sound muffled and hollow, with a gentle warble and bubbles.
 - **Indicators above heads**: a music note (♪) above whoever is talking, plus who has their mic muted, who is deafened and who has no voice chat.
 
@@ -46,6 +46,7 @@ It runs as a mod on **Fabric, NeoForge and Forge**, as a plugin on **Paper, Purp
 
 ### For server owners
 - **Moderation**: mute players in voice chat. Mutes are saved and persist across restarts.
+- **`/voice reload`**: change ranges, the voice limit, the echo or the spectator rules in the file and apply them without restarting the server.
 - **Spectators and dead players**: by default, spectators can't be heard by the players in the game (they talk among themselves and hear the game). You can change it: let them be heard, only listen… (`spectators` and `dead`).
 - **Permissions**, compatible with **LuckPerms** and identical on every platform:
 

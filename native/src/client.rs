@@ -70,6 +70,22 @@ const PEER_STATE_TTL: Duration = Duration::from_secs(3);
 const VOICE_STATE_EVERY: Duration = Duration::from_secs(5);
 /// Nivel de las reflexiones tempranas.
 const EARLY_LEVEL: f32 = 0.7;
+/// Cuánto puede crecer la mezcla húmeda al alejarse, respecto a la de cerca.
+///
+/// En una sala real el directo cae con la distancia pero el campo reverberante es
+/// casi igual en todas partes: de cerca oyes voz, al fondo oyes la sala. Mandar a la
+/// reverb la raíz de la ganancia directa da ese efecto, y el tope evita que a 60
+/// bloques solo quede cola.
+const REVERB_FAR_RATIO: f32 = 4.0;
+/// Distancia (bloques) a la que el aire se ha comido los agudos del todo.
+const AIR_FULL_DISTANCE: f32 = 48.0;
+/// Factor del corte a `AIR_FULL_DISTANCE`: 20 kHz * 0.25 = 5 kHz.
+const AIR_CUTOFF_FACTOR: f32 = 0.25;
+/// Cuánto se acerca la sala que suena a la que mide Java, por trama (20 ms).
+///
+/// Vale ~0.08: constante de tiempo de 250 ms. Java mide cada medio segundo, así que
+/// sin esto cruzar una puerta cambia la sala de golpe dos veces por segundo.
+const ROOM_GLIDE: f32 = 0.08;
 /// 3 s de ceros exactos: probablemente el sistema bloquea el micro.
 const MIC_SILENT_SAMPLES: usize = SAMPLE_RATE as usize * 3;
 
@@ -121,6 +137,15 @@ impl AtomicF32 {
     fn set(&self, v: f32) {
         self.0.store(v.to_bits(), Ordering::Relaxed)
     }
+}
+
+/// Con qué ganancia alimenta una voz la reverb de la sala, dada su ganancia directa.
+///
+/// La raíz: a un bloque se oye casi todo seco, al fondo de la nave casi todo cola,
+/// que es lo que pasa en una sala real. El tope deja de subir la proporción pasado
+/// cierto punto, para que de muy lejos no quede solo cola.
+fn reverb_send_gain(direct: f32) -> f32 {
+    direct.sqrt().min(direct * REVERB_FAR_RATIO).max(direct)
 }
 
 /// Escala las reflexiones para que su energía total no pase de `MAX_EARLY_ENERGY`.
@@ -186,6 +211,10 @@ struct Speaker {
     server_occlusion: Option<f32>,
     /// Reverb del sitio del hablante.
     env: Environment,
+    /// La misma, suavizada: el hablante también mide su sala a saltos, y si entra en
+    /// una cueva su voz no debe pasar a sonar con eco de golpe.
+    env_wet: f32,
+    env_room: f32,
     lowpass: f32,
     /// El hablante tiene la cabeza bajo el agua.
     underwater: bool,
@@ -214,6 +243,27 @@ pub struct SoundPath {
 struct Acoustics {
     damp: f32,
     reflections: Vec<Reflection>,
+}
+
+/// La sala que suena ahora mismo. Java manda el objetivo cada medio segundo y esto
+/// se le va acercando, para que al cambiar de sitio no haya un salto.
+#[derive(Debug, Clone, Copy, Default)]
+struct RoomSound {
+    wet: f32,
+    room: f32,
+    damp: f32,
+    /// Cuándo empieza la cola difusa (s).
+    pre_delay: f32,
+}
+
+impl RoomSound {
+    /// Se acerca al objetivo un paso de trama.
+    fn glide(&mut self, target: RoomSound) {
+        self.wet += (target.wet - self.wet) * ROOM_GLIDE;
+        self.room += (target.room - self.room) * ROOM_GLIDE;
+        self.damp += (target.damp - self.damp) * ROOM_GLIDE;
+        self.pre_delay += (target.pre_delay - self.pre_delay) * ROOM_GLIDE;
+    }
 }
 
 /// Grupos del servidor: la última lista entera y la que se está juntando, porque
@@ -246,10 +296,14 @@ struct Mixer {
     /// Voz propia para la reverb.
     self_echo: VecDeque<f32>,
     reverb: Reverb,
+    /// Tramas que quedan de cola por procesar con nadie hablando.
+    reverb_tail: u32,
     /// Reverb del sitio del oyente.
     listener_env: (f32, f32),
     acoustics: Acoustics,
     early: EarlyReflections,
+    /// La sala que suena, acercándose a la que mide Java (ver [`RoomSound`]).
+    sounding: RoomSound,
     params: SpatialParams,
 }
 
@@ -454,9 +508,11 @@ impl VoiceClient {
                 monitor: VecDeque::with_capacity(MONITOR_MAX),
                 self_echo: VecDeque::with_capacity(MONITOR_MAX),
                 reverb: Reverb::new(),
+                reverb_tail: 0,
                 listener_env: (0.0, 0.0),
                 acoustics: Acoustics { damp: 0.35, ..Acoustics::default() },
                 early: EarlyReflections::new(),
+                sounding: RoomSound { damp: 0.35, ..RoomSound::default() },
                 params: SpatialParams::default(),
             }),
             // Desactivados hasta que Java mande los ajustes.
@@ -1006,6 +1062,9 @@ impl Shared {
                     occlusion: 0.0,
                     server_occlusion: None,
                     env: frame.env,
+                    // Arranca ya en su sala: el primer paquete no tiene a qué subir.
+                    env_wet: frame.env.wet(),
+                    env_room: frame.env.room(),
                     lowpass: 0.0,
                     underwater: false,
                     water: Underwater::new(),
@@ -1172,6 +1231,9 @@ impl Shared {
         let water_fx = self.underwater_fx.load(Ordering::Relaxed) && self.server_underwater.load(Ordering::Relaxed);
         let me_underwater = water_fx && self.listener_underwater.load(Ordering::Relaxed);
         let (listener_wet, listener_room) = mixer.listener_env;
+        // La sala que sonaba en la trama anterior: el objetivo se calcula al final y
+        // se le va acercando, para que cambiar de sitio no dé un salto.
+        let sounding = mixer.sounding;
         let mut room = listener_room;
         mixer.paths.retain(|_, (_, t)| now.duration_since(*t) < PATH_TTL);
         mixer.positions.retain(|_, (_, t)| now.duration_since(*t) < POSITION_TTL);
@@ -1221,10 +1283,6 @@ impl Shared {
             let target = occlusion.get(id).copied().or(speaker.server_occlusion).unwrap_or(0.0);
             speaker.occlusion += (target - speaker.occlusion) * 0.3;
             let occ = speaker.occlusion;
-            // Paso bajo de un polo: ~20 kHz sin oclusión, ~500 Hz muy tapado.
-            let cutoff = 20_000.0 * (500.0f32 / 20_000.0).powf(occ);
-            let a = 1.0 - (-2.0 * std::f32::consts::PI * cutoff / SAMPLE_RATE as f32).exp();
-            let occ_gain = 1.0 - 0.65 * occ;
 
             let range = if speaker.range > 0.0 { speaker.range } else { base.max_distance };
             let params = SpatialParams {
@@ -1232,8 +1290,23 @@ impl Shared {
                 full_volume_distance: base.full_volume_distance.min(range * 0.25),
                 ..base
             };
+            let rel = speaker.rel;
+            let dist = (rel[0] * rel[0] + rel[1] * rel[1] + rel[2] * rel[2]).sqrt();
+
+            // Paso bajo de un polo. Dos cosas se comen los agudos: lo que haya en
+            // medio (~500 Hz muy tapado) y el aire, que a 48 bloques deja la voz en
+            // ~5 kHz. Es lo que hace que algo lejano suene lejano y no solo bajo.
+            let air = (dist / AIR_FULL_DISTANCE).clamp(0.0, 1.0);
+            let cutoff = 20_000.0 * (500.0f32 / 20_000.0).powf(occ) * AIR_CUTOFF_FACTOR.powf(air);
+            let a = 1.0 - (-2.0 * std::f32::consts::PI * cutoff / SAMPLE_RATE as f32).exp();
+            let occ_gain = 1.0 - 0.65 * occ;
+
+            // La sala del hablante también se suaviza; si no, entrar en una cueva le
+            // pone eco de golpe.
+            speaker.env_wet += (speaker.env.wet() - speaker.env_wet) * ROOM_GLIDE;
+            speaker.env_room += (speaker.env.room() - speaker.env_room) * ROOM_GLIDE;
             // Reverb: la del oyente o la del hablante, la mayor.
-            let send = if cave_echo { listener_wet.max(speaker.env.wet()) } else { 0.0 };
+            let send = if cave_echo { sounding.wet.max(speaker.env_wet) } else { 0.0 };
 
             // Camino alternativo: si la línea recta está tapada, la voz llega también
             // desde el hueco, más baja cuanto más largo el camino y más esquinas.
@@ -1251,10 +1324,11 @@ impl Shared {
                     let pa = 1.0 - (-2.0 * std::f32::consts::PI * cut / SAMPLE_RATE as f32).exp();
                     let g = speaker.path_gain;
                     let mut dry = [0f32; FRAME_SAMPLES];
+                    let rev = reverb_send_gain(g) * send;
                     for i in 0..n {
                         speaker.path_lowpass += pa * (pcm[i] - speaker.path_lowpass);
                         dry[i] = speaker.path_lowpass;
-                        reverb_in[i] += dry[i] * g * send;
+                        reverb_in[i] += dry[i] * rev;
                     }
                     if hrtf {
                         let dir = Direction::from_world(rel, yaw, pitch).unwrap_or(Direction::FRONT);
@@ -1271,22 +1345,21 @@ impl Shared {
             }
 
             if hrtf {
-                let r = speaker.rel;
-                let dist = (r[0] * r[0] + r[1] * r[1] + r[2] * r[2]).sqrt();
                 let g = spatial::distance_gain(dist, &params) * v * occ_gain;
                 if g <= 0.0 {
                     continue;
                 }
-                if cave_echo && speaker.env.wet() > 0.0 {
-                    room = room.max(speaker.env.room());
+                if cave_echo && speaker.env_wet > 0.001 {
+                    room = room.max(speaker.env_room);
                 }
                 // Demasiado cerca para tener dirección: de frente.
-                let dir = Direction::from_world(r, yaw, pitch).unwrap_or(Direction::FRONT);
+                let dir = Direction::from_world(rel, yaw, pitch).unwrap_or(Direction::FRONT);
                 let mut dry = [0f32; FRAME_SAMPLES];
+                let rev = reverb_send_gain(g) * send;
                 for i in 0..n {
                     speaker.lowpass += a * (pcm[i] - speaker.lowpass);
                     dry[i] = speaker.lowpass;
-                    reverb_in[i] += dry[i] * g * send;
+                    reverb_in[i] += dry[i] * rev;
                 }
                 speaker.binaural.process_add(&dry[..n], dir, g, &mut mix);
                 continue;
@@ -1297,15 +1370,16 @@ impl Shared {
             if gl + gr <= 0.0 {
                 continue;
             }
-            if cave_echo && speaker.env.wet() > 0.0 {
-                room = room.max(speaker.env.room());
+            if cave_echo && speaker.env_wet > 0.001 {
+                room = room.max(speaker.env_room);
             }
+            let rev = reverb_send_gain((gl + gr) * 0.5) * send;
             for i in 0..n {
                 speaker.lowpass += a * (pcm[i] - speaker.lowpass);
                 let s = speaker.lowpass;
                 mix[2 * i] += s * gl;
                 mix[2 * i + 1] += s * gr;
-                reverb_in[i] += s * (gl + gr) * 0.5 * send;
+                reverb_in[i] += s * rev;
             }
         }
 
@@ -1313,8 +1387,8 @@ impl Shared {
         // las reflexiones tempranas sonaría duplicada. En salas pequeñas no se aplica.
         let mut self_reverb = [0f32; FRAME_SAMPLES];
         if !mixer.self_echo.is_empty() {
-            let big = ((listener_room - SELF_ECHO_MIN_ROOM) / SELF_ECHO_MIN_ROOM).clamp(0.0, 1.0);
-            let gain = if cave_echo { listener_wet * SELF_ECHO_GAIN * volume * big * big * (3.0 - 2.0 * big) } else { 0.0 };
+            let big = ((sounding.room - SELF_ECHO_MIN_ROOM) / SELF_ECHO_MIN_ROOM).clamp(0.0, 1.0);
+            let gain = if cave_echo { sounding.wet * SELF_ECHO_GAIN * volume * big * big * (3.0 - 2.0 * big) } else { 0.0 };
             for slot in self_reverb.iter_mut() {
                 let Some(s) = mixer.self_echo.pop_front() else { break };
                 *slot = s * gain;
@@ -1322,14 +1396,14 @@ impl Shared {
         }
 
         // Reflexiones tempranas, giradas con la cabeza del oyente.
-        let early: Vec<(f32, f32, f32, f32)> = if cave_echo {
+        let early: Vec<(f32, f32, f32, f32, f32)> = if cave_echo {
             mixer
                 .acoustics
                 .reflections
                 .iter()
                 .filter_map(|r| {
                     let d = Direction::from_world([r.dir[0] * 8.0, r.dir[1] * 8.0, r.dir[2] * 8.0], yaw, pitch)?;
-                    Some((d.x, d.z, r.delay, r.gain * EARLY_LEVEL))
+                    Some((d.x, d.z, r.delay, r.gain * EARLY_LEVEL, r.damp))
                 })
                 .collect()
         } else {
@@ -1339,16 +1413,32 @@ impl Shared {
             mixer.early.process_add(&early, &reverb_in, &mut mix);
         }
 
+        // La sala que suena se acerca a la medida. El pre-retardo sale de cuándo
+        // vuelven las primeras reflexiones: es lo que da la sensación de tamaño.
+        let target = RoomSound {
+            wet: listener_wet,
+            room,
+            damp: mixer.acoustics.damp,
+            pre_delay: EarlyReflections::mean_delay(&early).unwrap_or(0.01 + 0.03 * room),
+        };
+        mixer.sounding.glide(target);
+        let now_room = mixer.sounding;
+
         // Reverb de la sala sobre las voces de proximidad y la propia.
         for (r, s) in reverb_in.iter_mut().zip(self_reverb) {
             *r += s;
         }
-        if reverb_in.iter().any(|s| *s != 0.0) {
-            mixer.reverb.set_params(1.0, room);
-            mixer.reverb.set_damp(mixer.acoustics.damp);
-            mixer.reverb.process_add(&reverb_in, &mut mix);
-        } else if mixer.reverb.is_active() {
-            // Deja terminar la cola.
+        // Mientras entra voz, y luego lo que dure la cola, para no cortarla de golpe.
+        // Pasado eso se deja de procesar: con nadie hablando no hay nada que mezclar.
+        let feeding = reverb_in.iter().any(|s| *s != 0.0);
+        mixer.reverb_tail = if feeding {
+            (crate::reverb::rt60_for_room(now_room.room) * 50.0) as u32 + 2
+        } else {
+            mixer.reverb_tail.saturating_sub(1)
+        };
+        if feeding || mixer.reverb_tail > 0 {
+            mixer.reverb.set_params(1.0, now_room.room, now_room.damp);
+            mixer.reverb.set_pre_delay(now_room.pre_delay);
             mixer.reverb.process_add(&reverb_in, &mut mix);
         }
 
@@ -1741,6 +1831,77 @@ mod tests {
         assert!((with_path / clear - 1.0).abs() < 0.01, "{with_path} vs {clear}");
     }
 
+    /// Renderiza `frames` tramas sin que llegue nada: solo queda la cola.
+    fn tail(c: &VoiceClient, frames: usize) -> Vec<f32> {
+        let mut out = vec![0f32; FRAME_SAMPLES * 2];
+        let mut rendered = Vec::new();
+        for _ in 0..frames {
+            c.render(&mut out);
+            rendered.extend_from_slice(&out);
+        }
+        rendered
+    }
+
+    /// De cerca se oye la voz, de lejos se oye la sala: la proporción de cola sube
+    /// con la distancia aunque las dos bajen.
+    #[test]
+    fn the_room_takes_over_as_the_voice_gets_further_away() {
+        let wet_ratio = |dist: f32| {
+            let c = local();
+            c.set_hrtf(false);
+            let refl = vec![
+                Reflection { dir: [1.0, 0.0, 0.0], delay: 0.035, gain: 0.6, damp: 0.05 },
+                Reflection { dir: [0.0, 0.0, -1.0], delay: 0.052, gain: 0.5, damp: 0.05 },
+            ];
+            c.set_acoustics(0.6, 0.8, 0.1, refl);
+            let direct = energy(&feed(&c, [20; 16], [0.0, 0.0, dist], false, 400.0, 40));
+            energy(&tail(&c, 30)) / direct
+        };
+        let (near, far) = (wet_ratio(2.0), wet_ratio(34.0));
+        println!("cola/directo: a 2 bloques {near:.4}, a 34 bloques {far:.4}");
+        // Medido: 0.12 a 2 bloques y 0.31 a 34, o sea 2.6 veces más sala.
+        assert!(far > near * 1.5, "de lejos debe quedar más sala que voz");
+    }
+
+    /// El aire se come los agudos: lo lejano suena apagado, no solo bajo.
+    #[test]
+    fn distance_eats_the_high_end() {
+        let caida = |freq: f32| {
+            let listen = |dist: f32| {
+                let c = local();
+                c.set_hrtf(false);
+                c.set_cave_echo(false);
+                energy(&feed(&c, [21; 16], [0.0, 0.0, dist], false, freq, 30))
+            };
+            listen(36.0) / listen(2.0)
+        };
+        let (graves, agudos) = (caida(300.0), caida(8_000.0));
+        println!("de 2 a 36 bloques queda: graves {graves:.5}, agudos {agudos:.5}");
+        // Medido: los agudos pierden 2.7 dB más que los graves, que es lo que se
+        // mide en el aire de verdad a esa distancia.
+        assert!(agudos < graves * 0.6, "los agudos deben caer más que los graves");
+    }
+
+    /// La sala que suena se acerca a la medida en ~250 ms: cruzar una puerta no da un
+    /// salto, que es lo que pasaba midiendo cada medio segundo y aplicando de golpe.
+    #[test]
+    fn the_room_slides_instead_of_jumping() {
+        let target = RoomSound { wet: 0.5, room: 0.9, damp: 0.2, pre_delay: 0.05 };
+        let mut now = RoomSound::default();
+        now.glide(target);
+        assert!(now.wet < target.wet * 0.15, "la primera trama apenas se mueve: {}", now.wet);
+        // 250 ms son 12 tramas: ahí va por la mitad; en un segundo ya está.
+        for _ in 1..12 {
+            now.glide(target);
+        }
+        assert!(now.wet > target.wet * 0.4 && now.wet < target.wet * 0.8, "a medio camino: {}", now.wet);
+        for _ in 12..50 {
+            now.glide(target);
+        }
+        assert!((now.wet - target.wet).abs() < target.wet * 0.05);
+        assert!((now.pre_delay - target.pre_delay).abs() < target.pre_delay * 0.05);
+    }
+
     #[test]
     fn a_nearby_wall_echoes_from_its_side() {
         // Hablante delante. Pared a 6 bloques al oeste (derecha mirando al sur): la
@@ -1750,7 +1911,7 @@ mod tests {
             let c = local();
             c.set_hrtf(false);
             let refl = if wall {
-                vec![Reflection { dir: [-1.0, 0.0, 0.0], delay: 12.0 / 343.0, gain: 0.8 }]
+                vec![Reflection { dir: [-1.0, 0.0, 0.0], delay: 12.0 / 343.0, gain: 0.8, damp: 0.05 }]
             } else {
                 vec![]
             };
@@ -1777,7 +1938,7 @@ mod tests {
         ]
         .iter()
         .enumerate()
-        .map(|(i, d)| Reflection { dir: *d, delay: if i == 0 { 0.0087 } else { 0.0117 }, gain: 0.63 })
+        .map(|(i, d)| Reflection { dir: *d, delay: if i == 0 { 0.0087 } else { 0.0117 }, gain: 0.63, damp: 0.05 })
         .collect();
         let play = |acoustics: bool| {
             let c = local();

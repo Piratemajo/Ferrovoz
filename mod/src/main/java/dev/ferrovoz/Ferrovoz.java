@@ -10,6 +10,7 @@ import net.minecraft.world.level.Level;
 import org.slf4j.Logger;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -67,6 +68,7 @@ public final class Ferrovoz {
     private static boolean nativeLoaded;
     private static FerrovozConfig config;
     private static Path dataFile;
+    private static Path configFile;
     private static volatile long server; // handle del VoiceServer (0 = parado)
     /** Jugadores con voz (túnel y oclusión). */
     private static final Map<UUID, ServerPlayer> registered = new ConcurrentHashMap<>();
@@ -92,7 +94,8 @@ public final class Ferrovoz {
         nativeLoaded = FerrovozNative.load();
         if (!nativeLoaded) return;
         Path configDir = p.configDir();
-        config = FerrovozConfig.load(configDir.resolve("ferrovoz.properties"));
+        configFile = configDir.resolve("ferrovoz.properties");
+        config = FerrovozConfig.load(configFile);
         dataFile = configDir.resolve("ferrovoz-data.txt");
         api = new ApiCore(new ApiCore.Bridge() {
             @Override
@@ -130,6 +133,23 @@ public final class Ferrovoz {
         return config;
     }
 
+    /**
+     * Relee {@code ferrovoz.properties} y deja puesto lo que se pueda sin reiniciar.
+     * El archivo manda: si un plugin había cambiado alcances o el eco por la API, esto
+     * los devuelve a lo que diga el archivo.
+     */
+    static VoiceCommands.Reload reloadConfig() {
+        if (!nativeLoaded || server == 0 || configFile == null) return VoiceCommands.Reload.unsupported();
+        FerrovozConfig fresh = FerrovozConfig.load(configFile);
+        List<String> live = fresh.liveChanges(config);
+        List<String> frozen = fresh.frozenChanges(config);
+        fresh.apply(server);
+        config = fresh;
+        api.reloaded(fresh);
+        LOG.info("Ferrovoz: configuration reloaded ({} changed)", live.isEmpty() ? "nothing" : String.join(", ", live));
+        return new VoiceCommands.Reload(live, frozen, true);
+    }
+
     static long voiceServer() {
         return server;
     }
@@ -142,11 +162,7 @@ public final class Ferrovoz {
             LOG.error("Ferrovoz: could not open UDP port {}. Is it in use?", config.port);
             return;
         }
-        FerrovozNative.serverSetRanges(server, config.maxDistance, config.whisperDistance, config.shoutDistance);
-        FerrovozNative.serverSetRoleRules(server, config.spectators, config.dead);
-        FerrovozNative.serverSetMaxVoices(server, config.maxVoices);
-        FerrovozNative.serverSetCaveEcho(server, config.caveEcho);
-        FerrovozNative.serverSetUnderwaterEffect(server, config.underwaterEffect);
+        config.apply(server);
         walls = new WallScheduler();
         // Silencios y grupos permanentes.
         FerrovozNative.serverSetDataFile(server, dataFile.toAbsolutePath().toString());

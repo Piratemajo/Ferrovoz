@@ -106,6 +106,11 @@ final class VanillaVoiceCommands {
             }
 
             @Override
+            public VoiceCommands.Reload reload() {
+                return Ferrovoz.reloadConfig();
+            }
+
+            @Override
             public UUID findOnline(String name) {
                 for (ServerPlayer p : mc.getPlayerList().getPlayers()) {
                     if (p.getName().getString().equalsIgnoreCase(name)) return p.getUUID();

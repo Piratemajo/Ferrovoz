@@ -25,11 +25,14 @@ final class BukkitVoiceCommands implements CommandExecutor, TabCompleter {
     private final LongSupplier server;
     private final Supplier<FerrovozConfig> config;
     private final java.util.Map<UUID, Player> online;
+    private final Supplier<VoiceCommands.Reload> reload;
 
-    BukkitVoiceCommands(LongSupplier server, Supplier<FerrovozConfig> config, java.util.Map<UUID, Player> online) {
+    BukkitVoiceCommands(LongSupplier server, Supplier<FerrovozConfig> config, java.util.Map<UUID, Player> online,
+            Supplier<VoiceCommands.Reload> reload) {
         this.server = server;
         this.config = config;
         this.online = online;
+        this.reload = reload;
     }
 
     static String node(String suffix) {
@@ -86,6 +89,11 @@ final class BukkitVoiceCommands implements CommandExecutor, TabCompleter {
             @Override
             public long voiceServer() {
                 return server.getAsLong();
+            }
+
+            @Override
+            public VoiceCommands.Reload reload() {
+                return BukkitVoiceCommands.this.reload.get();
             }
 
             @Override

@@ -37,8 +37,10 @@ public final class SoundGeometry {
 
     /**
      * Acústica de un sitio: wet (0..1), {@code room} (0..1, ver {@link #roomForRt60}),
-     * absorción de agudos (0..1) y reflexiones tempranas en grupos de 5
-     * {@code [dx, dy, dz, retardo s, ganancia]}.
+     * absorción de agudos (0..1) y reflexiones tempranas en grupos de 6
+     * {@code [dx, dy, dz, retardo s, ganancia, absorción de la pared]}. La absorción
+     * va por reflexión porque cada pared devuelve el sonido con su propio color: la
+     * piedra un chasquido brillante, la lana un golpe sordo.
      */
     public record Acoustics(float wet, float room, float damp, float rt60, float[] reflections) {}
 
@@ -279,14 +281,15 @@ public final class SoundGeometry {
         double energy = 0;
         for (int r : chosen) energy += gain[r] * gain[r] * (0.3 + 0.7 * enclosed) * (0.3 + 0.7 * enclosed);
         double norm = energy > MAX_EARLY_ENERGY ? Math.sqrt(MAX_EARLY_ENERGY / energy) : 1.0;
-        float[] refl = new float[chosen.size() * 5];
+        float[] refl = new float[chosen.size() * 6];
         for (int c = 0; c < chosen.size(); c++) {
             int r = chosen.get(c);
-            refl[5 * c] = (float) dirs[r][0];
-            refl[5 * c + 1] = (float) dirs[r][1];
-            refl[5 * c + 2] = (float) dirs[r][2];
-            refl[5 * c + 3] = (float) (2 * hitDist[r] / SPEED_OF_SOUND);
-            refl[5 * c + 4] = (float) (gain[r] * (0.3 + 0.7 * enclosed) * norm);
+            refl[6 * c] = (float) dirs[r][0];
+            refl[6 * c + 1] = (float) dirs[r][1];
+            refl[6 * c + 2] = (float) dirs[r][2];
+            refl[6 * c + 3] = (float) (2 * hitDist[r] / SPEED_OF_SOUND);
+            refl[6 * c + 4] = (float) (gain[r] * (0.3 + 0.7 * enclosed) * norm);
+            refl[6 * c + 5] = hitAlpha[r];
         }
         return new Acoustics(wet, roomForRt60(rt60), damp, rt60, refl);
     }

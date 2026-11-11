@@ -677,8 +677,9 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientSetEnvironment(
     })
 }
 
-/// Acústica de la sala: `wet`, `room`, `damp` y reflexiones tempranas en grupos de 5
-/// `[dx, dy, dz, retardo s, ganancia]` (dirección hacia la pared, coordenadas del mundo).
+/// Acústica de la sala: `wet`, `room`, `damp` y reflexiones tempranas en grupos de 6
+/// `[dx, dy, dz, retardo s, ganancia, absorción]` (dirección hacia la pared,
+/// coordenadas del mundo; la absorción es la del material que la devuelve).
 #[no_mangle]
 pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientSetAcoustics(
     env: JNIEnv,
@@ -697,9 +698,14 @@ pub extern "system" fn Java_dev_ferrovoz_FerrovozNative_clientSetAcoustics(
     guard((), || {
         if let Some(c) = client(h) {
             let refl = raw
-                .chunks_exact(5)
+                .chunks_exact(6)
                 .filter(|r| r.iter().all(|v| v.is_finite()))
-                .map(|r| crate::reverb::Reflection { dir: [r[0], r[1], r[2]], delay: r[3], gain: r[4].clamp(0.0, 1.0) })
+                .map(|r| crate::reverb::Reflection {
+                    dir: [r[0], r[1], r[2]],
+                    delay: r[3],
+                    gain: r[4].clamp(0.0, 1.0),
+                    damp: r[5].clamp(0.0, 1.0),
+                })
                 .collect();
             c.set_acoustics(wet, room, damp, refl);
         }

@@ -5,6 +5,8 @@ import java.io.Reader;
 import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Properties;
 
@@ -55,6 +57,42 @@ public final class FerrovozConfig {
      * oye nadie, aunque lo tenga activado.
      */
     public boolean underwaterEffect = true;
+
+    /**
+     * Deja en el relé todo lo que se puede cambiar con el servidor en marcha. Lo que no
+     * está aquí (puerto, interfaz, transporte) solo se aplica al arrancar.
+     */
+    public void apply(long server) {
+        FerrovozNative.serverSetRanges(server, maxDistance, whisperDistance, shoutDistance);
+        FerrovozNative.serverSetRoleRules(server, spectators, dead);
+        FerrovozNative.serverSetMaxVoices(server, maxVoices);
+        FerrovozNative.serverSetCaveEcho(server, caveEcho);
+        FerrovozNative.serverSetUnderwaterEffect(server, underwaterEffect);
+    }
+
+    /** Ajustes que han cambiado respecto a {@code old} y ya están puestos. */
+    public List<String> liveChanges(FerrovozConfig old) {
+        List<String> out = new ArrayList<>();
+        if (maxDistance != old.maxDistance) out.add("max_distance");
+        if (whisperDistance != old.whisperDistance) out.add("whisper_distance");
+        if (shoutDistance != old.shoutDistance) out.add("shout_distance");
+        if (maxVoices != old.maxVoices) out.add("max_voices");
+        if (caveEcho != old.caveEcho) out.add("cave_echo");
+        if (underwaterEffect != old.underwaterEffect) out.add("underwater_effect");
+        if (spectators != old.spectators) out.add("spectators");
+        if (dead != old.dead) out.add("dead");
+        return out;
+    }
+
+    /** Ajustes que han cambiado pero solo valen tras reiniciar el servidor. */
+    public List<String> frozenChanges(FerrovozConfig old) {
+        List<String> out = new ArrayList<>();
+        if (port != old.port) out.add("port");
+        if (!bindHost.equals(old.bindHost)) out.add("bind_host");
+        if (!publicHost.equals(old.publicHost)) out.add("public_host");
+        if (transport != old.transport) out.add("transport");
+        return out;
+    }
 
     public static final int RULE_NORMAL = 0, RULE_LISTEN = 1, RULE_GHOST = 2, RULE_OWN = 3, RULE_OFF = 4;
     private static final String[] RULE_NAMES = {"normal", "listen", "ghost", "own", "off"};

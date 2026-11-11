@@ -34,6 +34,10 @@ import java.util.UUID;
 final class WorldSensor {
     private static final int OCCLUSION_EVERY = 2;
     private static final int ACOUSTICS_EVERY = 10;
+    /** Si el oyente se ha movido esto desde la última medida, se mide antes. */
+    private static final double ACOUSTICS_MOVED = 1.5;
+    /** Mínimo entre medidas aunque corra: la medida cuesta ~1 ms. */
+    private static final int ACOUSTICS_MIN_EVERY = 4;
     /** Bloques que explora como mucho la búsqueda de camino (~1-2 ms). */
     private static final int PATH_NODES = 2000;
     /** Longitud máxima de un camino. */
@@ -43,6 +47,9 @@ final class WorldSensor {
     /** Hablantes tapados; se les busca camino por turnos, uno por tick. */
     private final List<UUID> occluded = new ArrayList<>();
     private int nextPath;
+    /** Dónde y cuándo se midió la sala la última vez. */
+    private Vec3 lastMeasured;
+    private int lastMeasuredTick = Integer.MIN_VALUE;
 
     /**
      * @param eye  posición de los oídos: el jugador, o la cámara en una repetición
@@ -54,9 +61,14 @@ final class WorldSensor {
         ticks++;
         LevelBlocks blocks = new LevelBlocks(level);
 
-        if (ticks % ACOUSTICS_EVERY == 0) {
+        // Cada medio segundo, o antes si se ha movido: cruzar una puerta cambia la sala
+        // y esperar al siguiente turno se nota.
+        int since = ticks - lastMeasuredTick;
+        if (since >= ACOUSTICS_EVERY || (moved(eye) && since >= ACOUSTICS_MIN_EVERY)) {
             SoundGeometry.Acoustics a = SoundGeometry.measure(blocks, eye.x, eye.y, eye.z);
             FerrovozNative.clientSetAcoustics(handle, a.wet(), a.room(), a.damp(), a.reflections());
+            lastMeasured = eye;
+            lastMeasuredTick = ticks;
         }
 
         if (speaking == null) return;
@@ -97,6 +109,13 @@ final class WorldSensor {
                 }
             }
         }
+    }
+
+    /** ¿Se ha movido el oyente lo bastante desde la última medida? */
+    private boolean moved(Vec3 eye) {
+        if (lastMeasured == null) return false;
+        double dx = eye.x - lastMeasured.x, dy = eye.y - lastMeasured.y, dz = eye.z - lastMeasured.z;
+        return dx * dx + dy * dy + dz * dz > ACOUSTICS_MOVED * ACOUSTICS_MOVED;
     }
 
     private static Player find(ClientLevel level, UUID id) {

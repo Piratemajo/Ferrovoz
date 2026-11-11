@@ -42,6 +42,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class FerrovozPlugin extends JavaPlugin implements Listener {
     private FerrovozConfig config;
+    private java.nio.file.Path configFile;
     private volatile long server; // handle del VoiceServer (0 = parado)
     private final Set<UUID> registered = ConcurrentHashMap.newKeySet();
     private PlayerScheduling scheduling;
@@ -79,7 +80,7 @@ public final class FerrovozPlugin extends JavaPlugin implements Listener {
             getLogger().warning("Could not hide group passwords from the console log: " + e);
         }
         // /voz responde aunque el relé no esté en marcha.
-        BukkitVoiceCommands handler = new BukkitVoiceCommands(() -> server, () -> config, online);
+        BukkitVoiceCommands handler = new BukkitVoiceCommands(() -> server, () -> config, online, this::reloadConfig);
         PluginCommand voz = getCommand("voz");
         if (voz != null) {
             voz.setExecutor(handler);
@@ -117,18 +118,15 @@ public final class FerrovozPlugin extends JavaPlugin implements Listener {
         api.register();
         getServer().getServicesManager().register(dev.ferrovoz.api.FerrovozApi.class, api, this, ServicePriority.Normal);
 
-        config = FerrovozConfig.load(getDataFolder().toPath().resolve("ferrovoz.properties"));
+        configFile = getDataFolder().toPath().resolve("ferrovoz.properties");
+        config = FerrovozConfig.load(configFile);
         server = FerrovozNative.serverStart(config.bindHost, config.port, config.maxDistance);
         if (server == 0) {
             getLogger().severe("Could not open UDP port " + config.port
                     + ". Is it in use? The server works, but without voice chat.");
             return;
         }
-        FerrovozNative.serverSetRanges(server, config.maxDistance, config.whisperDistance, config.shoutDistance);
-        FerrovozNative.serverSetRoleRules(server, config.spectators, config.dead);
-        FerrovozNative.serverSetMaxVoices(server, config.maxVoices);
-        FerrovozNative.serverSetCaveEcho(server, config.caveEcho);
-        FerrovozNative.serverSetUnderwaterEffect(server, config.underwaterEffect);
+        config.apply(server);
         // Silencios y grupos permanentes.
         FerrovozNative.serverSetDataFile(server, getDataFolder().toPath().resolve("data.txt").toAbsolutePath().toString());
 
@@ -172,6 +170,22 @@ public final class FerrovozPlugin extends JavaPlugin implements Listener {
         }
         String mode = PlayerScheduling.isFolia() ? "Folia" : scheduling instanceof PaperScheduling ? "Paper" : "Spigot";
         getLogger().info("Voice server on UDP port " + config.port + " (" + mode + " mode)");
+    }
+
+    /**
+     * Relee {@code ferrovoz.properties} y deja puesto lo que valga sin reiniciar. El
+     * archivo manda: lo que un plugin hubiera cambiado por la API vuelve a lo que diga.
+     */
+    private VoiceCommands.Reload reloadConfig() {
+        if (server == 0 || configFile == null) return VoiceCommands.Reload.unsupported();
+        FerrovozConfig fresh = FerrovozConfig.load(configFile);
+        java.util.List<String> live = fresh.liveChanges(config);
+        java.util.List<String> frozen = fresh.frozenChanges(config);
+        fresh.apply(server);
+        config = fresh;
+        api.reloaded(fresh);
+        getLogger().info("Configuration reloaded (" + (live.isEmpty() ? "nothing" : String.join(", ", live)) + " changed)");
+        return new VoiceCommands.Reload(live, frozen, true);
     }
 
     @Override

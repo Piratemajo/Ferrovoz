@@ -65,6 +65,7 @@ public final class VoiceCommands {
             Map.entry("estado", "status"), Map.entry("status", "status"),
             Map.entry("silenciar", "mute"), Map.entry("mute", "mute"),
             Map.entry("desilenciar", "unmute"), Map.entry("unmute", "unmute"),
+            Map.entry("recargar", "reload"), Map.entry("reload", "reload"),
             Map.entry("crear", "create"), Map.entry("create", "create"),
             Map.entry("unirse", "join"), Map.entry("join", "join"),
             Map.entry("salir", "leave"), Map.entry("leave", "leave"),
@@ -74,8 +75,8 @@ public final class VoiceCommands {
             Map.entry("desfijar", "unpin"), Map.entry("unpin", "unpin"),
             Map.entry("borrar", "delete"), Map.entry("delete", "delete"));
 
-    private static final List<String> TOP_ES = List.of("grupo", "estado", "silenciar", "desilenciar");
-    private static final List<String> TOP_EN = List.of("group", "status", "mute", "unmute");
+    private static final List<String> TOP_ES = List.of("grupo", "estado", "silenciar", "desilenciar", "recargar");
+    private static final List<String> TOP_EN = List.of("group", "status", "mute", "unmute", "reload");
     private static final List<String> GROUP_ES = List.of("crear", "unirse", "salir", "lista", "expulsar", "fijar", "desfijar", "borrar");
     private static final List<String> GROUP_EN = List.of("create", "join", "leave", "list", "kick", "pin", "unpin", "delete");
 
@@ -93,6 +94,16 @@ public final class VoiceCommands {
         String locale();
     }
 
+    /**
+     * Lo que ha dado una recarga: qué se aplicó y qué espera a un reinicio.
+     * {@code supported} es false donde la plataforma no sepa releer el archivo.
+     */
+    public record Reload(List<String> changed, List<String> restart, boolean supported) {
+        public static Reload unsupported() {
+            return new Reload(List.of(), List.of(), false);
+        }
+    }
+
     /** Servidor. */
     public interface Host {
         long voiceServer();
@@ -105,6 +116,11 @@ public final class VoiceCommands {
         Collection<String> onlineNames();
 
         FerrovozConfig config();
+
+        /** Relee {@code ferrovoz.properties} y aplica lo que se pueda en caliente. */
+        default Reload reload() {
+            return Reload.unsupported();
+        }
 
         /** Mensaje de chat a un jugador conectado (si no lo está, nada). */
         void message(UUID player, String message);
@@ -136,6 +152,7 @@ public final class VoiceCommands {
             case "status" -> status(s, h);
             case "mute" -> mute(s, h, args, true);
             case "unmute" -> mute(s, h, args, false);
+            case "reload" -> reload(s, h);
             default -> help(s);
         }
     }
@@ -261,6 +278,27 @@ public final class VoiceCommands {
     }
 
     // --- Administración ---
+
+    /** {@code /voz recargar}: relee el archivo y aplica lo que valga en caliente. */
+    private static void reload(Sender s, Host h) {
+        String lang = s.locale();
+        if (!s.hasPermission(PERM_ADMIN)) {
+            s.reply(err(lang, "no_permission"));
+            return;
+        }
+        Reload r = h.reload();
+        if (!r.supported()) {
+            s.reply(err(lang, "reload.unsupported"));
+            return;
+        }
+        s.reply(r.changed().isEmpty()
+                ? Messages.prefixed(lang, "reload.nothing")
+                : Messages.prefixed(lang, "reload.done", String.join(", ", r.changed())));
+        if (!r.restart().isEmpty()) {
+            s.reply("  " + Messages.tr(lang, "reload.restart", String.join(", ", r.restart())));
+        }
+    }
+
 
     /** Para calcular la CPU del relé entre dos {@code /voz estado}. */
     private static long lastBusyNs = -1, lastStatusNanos;

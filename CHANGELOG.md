@@ -3,6 +3,23 @@
 Formato: una sección `## [versión]` por versión. Al publicar, el CI copia la
 sección de esa versión como notas de la release.
 
+## [Sin publicar]
+
+- **El eco se parece mucho más a una sala de verdad.** Seis cambios en la acústica:
+  - **La cola ya no empieza encima de la voz**: arranca cuando vuelven las primeras reflexiones (pre-retardo de 5 a 80 ms, según lo lejos que estén las paredes). Es lo que hacía que una caverna sonara a efecto en vez de a sitio grande.
+  - **Decae por bandas**: los graves duran hasta un 35 % más que la banda media y los agudos entre un 20 % y un 70 % menos, según el material. Antes todo el espectro se apagaba igual, y por eso la piedra no sonaba a piedra.
+  - **Cada primer eco se filtra con el material de la pared que lo devuelve**: la piedra, un chasquido brillante; la lana o el musgo, un golpe sordo. La absorción de cada pared ya se medía y no llegaba al audio.
+  - **De cerca se oye la voz y de lejos se oye la sala**: la proporción de cola crece con la distancia hasta cuatro veces (medido: 2,6 veces más cola a 34 bloques que a 2). Antes la mezcla seco/húmedo era la misma a un bloque que a treinta, que es justo lo contrario de lo que pasa en una sala.
+  - **El aire se come los agudos**: a 36 bloques se pierden 2,7 dB más de agudos que de graves, lo mismo que en el aire de verdad. Es lo que hace que algo lejano suene lejano y no solo bajo.
+  - **Cruzar una puerta ya no cambia la sala de golpe**: se desliza en ~250 ms, y el cliente la vuelve a medir a los 4 ticks si te has movido más de bloque y medio, en vez de esperar siempre al medio segundo. Lo mismo con la sala de quien habla: si entra en una cueva, su voz no pasa a sonar con eco de un salto.
+
+  Todo esto corre en el cliente: 0,3 % de un núcleo con las ocho reflexiones puestas, y el servidor no paga nada.
+- La entrada de la reverb lleva un paso alto a 80 Hz: ninguna sala reverbera a 0 Hz, y con los graves durando casi cinco segundos la continua se acumulaba. La cola también queda más limpia.
+- La reverb deja de procesar cuando se acaba la cola. Antes seguía dando vueltas para siempre desde la primera voz, aunque no hablara nadie.
+- Para quien compile el núcleo aparte: `clientSetAcoustics` recibe las reflexiones en grupos de 6 en vez de 5, y el valor nuevo es la absorción de la pared (0 = piedra, 1 = lana).
+
+- **`/voz recargar`**: relee `ferrovoz.properties` con el servidor en marcha y deja puesto al momento lo que se puede cambiar en caliente (los tres alcances, `max_voices`, `cave_echo`, `underwater_effect` y las reglas de espectadores y muertos). Contesta con lo que ha cambiado y, si tocaste el puerto, la interfaz o el transporte, avisa de que eso espera a un reinicio. En inglés, `/voice reload`. Manda el archivo: lo que un plugin hubiera cambiado por la API vuelve a lo que diga `ferrovoz.properties`.
+
 ## [0.13.1]
 
 - **Nadie puede dejar el servidor lleno de grupos**: hay un tope de 256 grupos y de 3 por dueño. Sin él, un jugador podía crear un grupo, fijarlo y salir en bucle: cada uno se quedaba en `ferrovoz-data.txt` para siempre, el arranque se hacía más lento y, sobre todo, **cada cambio de grupo posterior encarecía**, porque el archivo se preparaba con el estado del relé bloqueado. Si ya tienes más de 256 guardados no se borra ninguno (puede ser un grupo preparado a propósito para un evento): el log avisa y se pueden quitar con `/voz grupo borrar`.

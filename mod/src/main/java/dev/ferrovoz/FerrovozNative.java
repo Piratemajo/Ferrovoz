@@ -240,7 +240,8 @@ public final class FerrovozNative {
 
     /**
      * Acústica de la sala: wet (0..1), {@code room} (0..1), absorción de agudos (0..1) y
-     * reflexiones tempranas en grupos de 5 {@code [dx, dy, dz, retardo s, ganancia]}.
+     * reflexiones tempranas en grupos de 6
+     * {@code [dx, dy, dz, retardo s, ganancia, absorción de la pared]}.
      */
     public static native void clientSetAcoustics(long handle, float wet, float room, float damp, float[] reflections);
 

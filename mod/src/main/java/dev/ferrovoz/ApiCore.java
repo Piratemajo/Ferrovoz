@@ -114,6 +114,11 @@ public final class ApiCore implements FerrovozApi {
         bus.post(new VoiceServerStartedEvent());
     }
 
+    /** Se ha releído la configuración: los ajustes vuelven a lo que diga el archivo. */
+    public void reloaded(FerrovozConfig config) {
+        settings.load(config);
+    }
+
     /** El relé se va a parar (todavía responde). */
     public void stopping() {
         if (server == 0) return;
