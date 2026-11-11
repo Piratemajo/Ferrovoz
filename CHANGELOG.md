@@ -3,6 +3,14 @@
 Formato: una sección `## [versión]` por versión. Al publicar, el CI copia la
 sección de esa versión como notas de la release.
 
+## [0.13.1]
+
+- **Nadie puede dejar el servidor lleno de grupos**: hay un tope de 256 grupos y de 3 por dueño. Sin él, un jugador podía crear un grupo, fijarlo y salir en bucle: cada uno se quedaba en `ferrovoz-data.txt` para siempre, el arranque se hacía más lento y, sobre todo, **cada cambio de grupo posterior encarecía**, porque el archivo se preparaba con el estado del relé bloqueado. Si ya tienes más de 256 guardados no se borra ninguno (puede ser un grupo preparado a propósito para un evento): el log avisa y se pueden quitar con `/voz grupo borrar`.
+- **Guardar ya no prepara el archivo con la voz parada**: el estado solo se copia, y ordenarlo y darle formato lo hace el hilo que escribe.
+- **Una posición que no es un número ya no apaga la voz de alguien**: si Minecraft manda una posición con NaN o infinito, se mantiene la anterior y se avisa en el log una vez. Antes se guardaba tal cual, y como toda comparación de distancia con NaN es falsa, ese jugador dejaba de oír y de ser oído sin que nada lo dijera.
+- **Las IP que mandan basura se recuerdan mejor**: al llenarse la tabla ya solo se olvidan las direcciones que han recuperado su crédito, en vez de vaciarla entera. Una ráfaga desde muchas direcciones borraba también el bloqueo de quien estaba abusando.
+- Para la API, `VoiceGroupException.Reason` tiene una razón nueva, `TOO_MANY`.
+
 ## [0.13.0]
 
 - **Los grupos se manejan desde los ajustes (J → Grupos…)**, sin escribir comandos: salen los grupos del servidor con cuántos están dentro, cuáles piden contraseña y cuáles son permanentes, se entra y se sale con un clic, se crea uno escribiendo nombre y contraseña, y el dueño expulsa, fija o borra desde ahí. También muestra quién está en el grupo propio. La pantalla le pide la lista al servidor solo mientras está abierta, así que donde nadie la mire no cuesta nada. Cada botón manda su comando, así que el servidor comprueba y avisa lo mismo que al escribirlo, y un plugin que cancele el evento sigue cancelándolo. Con un servidor anterior a esta versión quedan crear y unirse escribiendo el nombre.

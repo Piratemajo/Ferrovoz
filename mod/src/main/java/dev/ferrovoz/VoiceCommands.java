@@ -257,7 +257,7 @@ public final class VoiceCommands {
     }
 
     static String groupError(String lang, int code, String name) {
-        return code >= 1 && code <= 7 ? err(lang, "error." + code, name) : err(lang, "error.unknown", code);
+        return code >= 1 && code <= 8 ? err(lang, "error." + code, name) : err(lang, "error.unknown", code);
     }
 
     // --- Administración ---

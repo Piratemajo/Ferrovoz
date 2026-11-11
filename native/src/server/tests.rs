@@ -1,5 +1,6 @@
 //! Pruebas del relé (lo que no necesita red de verdad; lo demás está en tests/).
 
+use super::groups::{GROUPS_MAX, GROUPS_PER_OWNER};
 use super::*;
 
 fn server() -> VoiceServer {
@@ -257,4 +258,86 @@ fn route_cost_with_500_together() {
         println!("ronda {seq}: {per_frame:.1} µs por trama, {:.1} oyentes por trama", jobs as f64 / keys.len() as f64);
     }
     println!("mejor: {best:.1} µs por trama ({:.0} tramas/s en un hilo)", 1e6 / best);
+}
+
+/// Sin tope, un jugador podía crear y fijar grupos en bucle: cada uno se queda en el
+/// archivo de datos para siempre y encarece cada cambio de grupo posterior.
+#[test]
+fn nobody_can_leave_the_server_full_of_pinned_groups() {
+    let s = server();
+    let a = [1; 16];
+    s.add_player(a);
+    // Crear, fijar y salir: el grupo se queda, con él como dueño.
+    for n in 0..GROUPS_PER_OWNER {
+        assert_eq!(s.create_group(&a, &format!("suyo {n}"), None), Ok(()), "el número {n}");
+        s.set_group_persistent_by_name(&format!("suyo {n}"), true).unwrap();
+        assert!(s.leave_group(&a));
+    }
+    assert_eq!(s.create_group(&a, "uno más", None), Err(GroupError::TooMany), "ya tiene {GROUPS_PER_OWNER}");
+    assert_eq!(s.list_groups().len(), GROUPS_PER_OWNER);
+
+    // Y con el servidor lleno tampoco puede otro, aunque no tenga ninguno.
+    let b = [2; 16];
+    s.add_player(b);
+    assert_eq!(s.create_group(&b, "de otro", None), Ok(()), "a este le queda sitio");
+    assert!(s.leave_group(&b));
+    {
+        // Rellenar hasta el tope sin pasar por el límite por dueño (como lo haría la API).
+        let mut st = s.state();
+        while st.groups.len() < GROUPS_MAX {
+            let id = st.next_group;
+            st.next_group += 1;
+            let group = Group {
+                name: format!("relleno {id}"),
+                password: None,
+                owner: None,
+                persistent: true,
+                saved_members: HashSet::new(),
+            };
+            st.groups.insert(id, group);
+        }
+    }
+    assert_eq!(s.create_group(&b, "ya no cabe", None), Err(GroupError::TooMany));
+}
+
+/// Minecraft manda a veces posiciones con NaN. Guardarlas dejaba a ese jugador sin oír
+/// ni ser oído, y sin un solo aviso.
+#[test]
+fn a_position_that_is_not_a_number_is_ignored() {
+    let s = server();
+    let a = [1; 16];
+    s.add_player(a);
+    s.update_player(&a, [10.0, 64.0, -5.0], 1);
+    for bad in [[f64::NAN, 64.0, 0.0], [0.0, f64::INFINITY, 0.0], [0.0, 64.0, f64::NEG_INFINITY]] {
+        s.update_player(&a, bad, 1);
+        let st = s.state();
+        let p = &st.players[&a];
+        assert_eq!(p.pos, [10.0, 64.0, -5.0], "se queda donde estaba con {bad:?}");
+        assert_eq!(p.cell, Cell::of([10.0, 64.0, -5.0], 1));
+    }
+    // Y una buena sí se aplica.
+    s.update_player(&a, [20.0, 65.0, 1.0], 1);
+    assert_eq!(s.state().players[&a].pos, [20.0, 65.0, 1.0]);
+}
+
+/// Al limpiar la tabla de IP ruidosas solo se olvidan las que ya han pagado su castigo:
+/// antes se vaciaba entera, así que una ráfaga desde muchas direcciones borraba también
+/// el bloqueo de quien estaba abusando.
+#[test]
+fn clearing_the_noisy_ip_table_keeps_the_ones_still_blocked() {
+    let s = server();
+    let abuser = "203.0.113.7:4000".parse().unwrap();
+    for _ in 0..(BAD_PACKETS_BURST as usize + 5) {
+        let _ = s.shared.handle(b"basura", Source::Udp(abuser), &mut Vec::new(), &mut Vec::new());
+    }
+    assert!(s.state().bad_ips.get_mut(&abuser.ip()).unwrap().is_empty(), "se le acabó el crédito");
+
+    // Muchas direcciones distintas, cada una con un solo paquete malo: les sobra crédito.
+    for n in 0..=BAD_IPS_MAX {
+        let addr = format!("198.51.100.{}:{}", n % 256, 5000 + n / 256).parse().unwrap();
+        let _ = s.shared.handle(b"basura", Source::Udp(addr), &mut Vec::new(), &mut Vec::new());
+    }
+    let st = s.state();
+    assert!(st.bad_ips.len() <= BAD_IPS_MAX + 1, "la tabla no crece sin fin: {}", st.bad_ips.len());
+    assert!(st.bad_ips.contains_key(&abuser.ip()), "el que abusa sigue castigado");
 }

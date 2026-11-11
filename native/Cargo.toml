@@ -1,6 +1,6 @@
 [package]
 name = "ferrovoz-native"
-version = "0.13.0"
+version = "0.13.1"
 edition = "2021"
 description = "Núcleo nativo de Ferrovoz: chat de voz por proximidad para Minecraft (Fabric)"
 license = "MIT"

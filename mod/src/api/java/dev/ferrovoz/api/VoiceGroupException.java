@@ -13,6 +13,8 @@ public final class VoiceGroupException extends RuntimeException {
         UNKNOWN_PLAYER,
         NOT_OWNER,
         NOT_IN_GROUP,
+        /** Too many groups on the server, or too many owned by that player. */
+        TOO_MANY,
         /** The voice relay isn't running. */
         NOT_RUNNING,
         UNKNOWN
@@ -39,6 +41,7 @@ public final class VoiceGroupException extends RuntimeException {
             case 5 -> Reason.UNKNOWN_PLAYER;
             case 6 -> Reason.NOT_OWNER;
             case 7 -> Reason.NOT_IN_GROUP;
+            case 8 -> Reason.TOO_MANY;
             default -> Reason.UNKNOWN;
         };
     }

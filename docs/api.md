@@ -19,7 +19,7 @@ Every [release](https://github.com/Piratemajo/Ferrovoz/releases) has a `ferrovoz
 
 ```groovy
 dependencies {
-    compileOnly files('libs/ferrovoz-api-0.13.0.jar')
+    compileOnly files('libs/ferrovoz-api-0.13.1.jar')
 }
 ```
 

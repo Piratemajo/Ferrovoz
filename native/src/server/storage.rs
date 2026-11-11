@@ -1,5 +1,6 @@
 //! `ferrovoz-data.txt`: grupos permanentes y silencios, escritos en su propio hilo.
 
+use super::groups::GROUPS_MAX;
 use super::*;
 
 /// Escribe el archivo de datos en su propio hilo, para que la voz no espere al disco
@@ -13,13 +14,52 @@ pub(super) struct Saver {
 
 #[derive(Default)]
 pub(super) struct SaveQueue {
-    next: Option<(PathBuf, String)>,
+    next: Option<(PathBuf, SaveData)>,
     closed: bool,
 }
 
+/// Lo que hace falta para escribir el archivo, copiado del estado. Ordenarlo y
+/// formatearlo lo hace el hilo que guarda: con muchos grupos fijos, hacerlo donde se
+/// llama costaba milisegundos con el candado del relé cogido, o sea con la voz parada.
+#[derive(Default)]
+pub(super) struct SaveData {
+    mutes: Vec<PlayerId>,
+    groups: Vec<SavedGroup>,
+}
+
+struct SavedGroup {
+    name: String,
+    owner: Option<PlayerId>,
+    password: Option<PasswordHash>,
+    members: Vec<PlayerId>,
+}
+
+impl SaveData {
+    fn text(mut self) -> String {
+        let mut s = String::from("# Ferrovoz: silencios y grupos permanentes. Edítalo solo con el servidor apagado.\n");
+        let mut mutes: Vec<String> = self.mutes.iter().map(protocol::uuid_to_string).collect();
+        mutes.sort();
+        for m in mutes {
+            s.push_str(&format!("mute\t{m}\n"));
+        }
+        self.groups.sort_by_key(|g| g.name.to_lowercase());
+        for g in &self.groups {
+            let owner = g.owner.as_ref().map(protocol::uuid_to_string).unwrap_or_else(|| "-".into());
+            let password = g.password.as_ref().map(PasswordHash::encode).unwrap_or_default();
+            s.push_str(&format!("group\t{}\t{}\t{}\n", g.name, owner, password));
+            let mut members: Vec<String> = g.members.iter().map(protocol::uuid_to_string).collect();
+            members.sort();
+            for m in members {
+                s.push_str(&format!("member\t{}\t{m}\n", g.name));
+            }
+        }
+        s
+    }
+}
+
 impl Saver {
-    pub(super) fn submit(&self, path: PathBuf, text: String) {
-        lock(&self.queue).next = Some((path, text));
+    pub(super) fn submit(&self, path: PathBuf, data: SaveData) {
+        lock(&self.queue).next = Some((path, data));
         self.wake.notify_one();
     }
 
@@ -42,7 +82,8 @@ impl Saver {
                     q = self.wake.wait(q).unwrap_or_else(std::sync::PoisonError::into_inner);
                 }
             };
-            let Some((path, text)) = job else { return };
+            let Some((path, data)) = job else { return };
+            let text = data.text();
             // Escritura atómica (temporal + rename): un corte a mitad no deja el archivo roto.
             let tmp = path.with_extension("tmp");
             if let Err(e) = std::fs::write(&tmp, text).and_then(|()| std::fs::rename(&tmp, &path)) {
@@ -71,26 +112,23 @@ impl VoiceServer {
 }
 
 impl State {
-    pub(super) fn serialize(&self) -> String {
-        let mut s = String::from("# Ferrovoz: silencios y grupos permanentes. Edítalo solo con el servidor apagado.\n");
-        let mut mutes: Vec<String> = self.admin_muted.iter().map(protocol::uuid_to_string).collect();
-        mutes.sort();
-        for m in mutes {
-            s.push_str(&format!("mute\t{m}\n"));
+    /// Copia lo que va al archivo. Barato: ni ordena ni formatea, eso es del hilo que
+    /// guarda (ver [`SaveData`]).
+    fn snapshot(&self) -> SaveData {
+        SaveData {
+            mutes: self.admin_muted.iter().copied().collect(),
+            groups: self
+                .groups
+                .values()
+                .filter(|g| g.persistent)
+                .map(|g| SavedGroup {
+                    name: g.name.clone(),
+                    owner: g.owner,
+                    password: g.password.clone(),
+                    members: g.saved_members.iter().copied().collect(),
+                })
+                .collect(),
         }
-        let mut groups: Vec<&Group> = self.groups.values().filter(|g| g.persistent).collect();
-        groups.sort_by_key(|g| g.name.to_lowercase());
-        for g in groups {
-            let owner = g.owner.as_ref().map(protocol::uuid_to_string).unwrap_or_else(|| "-".into());
-            let password = g.password.as_ref().map(PasswordHash::encode).unwrap_or_default();
-            s.push_str(&format!("group\t{}\t{}\t{}\n", g.name, owner, password));
-            let mut members: Vec<String> = g.saved_members.iter().map(protocol::uuid_to_string).collect();
-            members.sort();
-            for m in members {
-                s.push_str(&format!("member\t{}\t{m}\n", g.name));
-            }
-        }
-        s
     }
 
     /// Devuelve true si había contraseñas antiguas en claro: se han protegido y hay que
@@ -141,13 +179,19 @@ impl State {
                 _ => {}
             }
         }
+        if self.groups.len() > GROUPS_MAX {
+            log::warn!(
+                "voice relay: {} saved groups, more than the {GROUPS_MAX} allowed: no new ones can be created until some are deleted with /voice group delete",
+                self.groups.len()
+            );
+        }
         upgraded
     }
 
-    /// Prepara el archivo aquí (en memoria, rápido) y lo escribe el hilo de [`Saver`].
+    /// Copia lo que hay que guardar; escribirlo es cosa del hilo de [`Saver`].
     pub(super) fn save(&self) {
         if let Some(path) = &self.data_file {
-            self.saver.submit(path.clone(), self.serialize());
+            self.saver.submit(path.clone(), self.snapshot());
         }
     }
 }

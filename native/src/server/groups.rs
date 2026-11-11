@@ -11,6 +11,8 @@ pub enum GroupError {
     UnknownPlayer,
     NotOwner,
     NotInGroup,
+    /// Hay demasiados grupos en el servidor, o demasiados de este dueño.
+    TooMany,
 }
 
 impl GroupError {
@@ -24,9 +26,18 @@ impl GroupError {
             Self::UnknownPlayer => 5,
             Self::NotOwner => 6,
             Self::NotInGroup => 7,
+            Self::TooMany => 8,
         }
     }
 }
+
+/// Grupos que puede haber a la vez. Sin tope, un jugador podía crear y fijar grupos en
+/// bucle: cada uno queda en `ferrovoz-data.txt` para siempre y hace más lento cada
+/// cambio de grupo posterior.
+pub(super) const GROUPS_MAX: usize = 256;
+/// Grupos que puede tener uno a la vez. Como un temporal vacío se borra, esto limita
+/// cuántos fijos puede dejar cada jugador.
+pub(super) const GROUPS_PER_OWNER: usize = 3;
 
 impl VoiceServer {
     /// Crea un grupo con `creator` como dueño.
@@ -48,6 +59,11 @@ impl VoiceServer {
             }
             if st.find_group(name).is_some() {
                 return Err(GroupError::AlreadyExists);
+            }
+            if st.groups.len() >= GROUPS_MAX
+                || st.groups.values().filter(|g| g.owner == Some(*creator)).count() >= GROUPS_PER_OWNER
+            {
+                return Err(GroupError::TooMany);
             }
             let id = st.next_group;
             st.next_group += 1;

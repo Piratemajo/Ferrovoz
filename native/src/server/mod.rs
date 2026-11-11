@@ -92,6 +92,8 @@ const CONTROL_RATE: f32 = 5.0;
 const GROUP_LIST_EVERY: Duration = Duration::from_millis(400);
 const CONTROL_BURST: f32 = 20.0;
 /// Paquetes inválidos por segundo tolerados por IP antes de ignorarla.
+/// Direcciones de las que se recuerda cuánta basura mandan.
+const BAD_IPS_MAX: usize = 4096;
 const BAD_PACKETS_RATE: f32 = 20.0;
 const BAD_PACKETS_BURST: f32 = 60.0;
 
@@ -136,6 +138,12 @@ impl TokenBucket {
         let now = Instant::now();
         self.tokens = (self.tokens + now.duration_since(self.last).as_secs_f32() * self.rate).min(self.burst);
         self.last = now;
+    }
+
+    /// Ya ha recuperado todo su crédito: no le queda castigo que recordar.
+    fn full(&mut self) -> bool {
+        self.refill();
+        self.tokens >= self.burst
     }
 
     pub(crate) fn take(&mut self) -> bool {
@@ -205,6 +213,8 @@ struct Player {
     control_bucket: TokenBucket,
     /// Última lista de grupos que se le mandó (ver [`GROUP_LIST_EVERY`]).
     groups_sent: Instant,
+    /// Ya se avisó de una posición no numérica suya: no se repite 20 veces por segundo.
+    warned_position: bool,
     pos: [f64; 3],
     dimension: i32,
     /// Zona de multitudes de `pos`; se recalcula solo al moverse (ver [`Player::place`]).
@@ -232,6 +242,16 @@ struct Player {
 
 impl Player {
     fn place(&mut self, pos: [f64; 3], dimension: i32) {
+        // Minecraft manda a veces una posición con NaN o infinito. Guardarla dejaba a ese
+        // jugador sin oír ni ser oído y sin decir nada, porque toda comparación de
+        // distancia con NaN es falsa. Mejor quedarse donde estaba.
+        if !pos.iter().all(|c| c.is_finite()) {
+            if !self.warned_position {
+                self.warned_position = true;
+                log::warn!("voice relay: ignoring a position that is not a number ({pos:?})");
+            }
+            return;
+        }
         self.pos = pos;
         self.dimension = dimension;
         self.cell = Cell::of(pos, dimension);
@@ -476,6 +496,7 @@ impl VoiceServer {
                     audio_bucket: TokenBucket::new(AUDIO_RATE, AUDIO_BURST),
                     control_bucket: TokenBucket::new(CONTROL_RATE, CONTROL_BURST),
                     groups_sent: Instant::now() - GROUP_LIST_EVERY,
+                    warned_position: false,
                     pos: [0.0; 3],
                     dimension: 0,
                     cell: Cell::of([0.0; 3], 0),
@@ -837,8 +858,14 @@ impl Shared {
     /// IP que manda demasiada basura: se ignora un rato sin descifrar nada.
     fn note_bad_packet(st: &mut State, source: Source) {
         if let Source::Udp(addr) = source {
-            if st.bad_ips.len() > 4096 {
-                st.bad_ips.clear();
+            if st.bad_ips.len() > BAD_IPS_MAX {
+                // Solo se olvidan las que ya han recuperado su crédito. Vaciarlo entero
+                // dejaba que una ráfaga desde muchas direcciones (o falsificándolas)
+                // borrase también el castigo de quien estaba bloqueado.
+                st.bad_ips.retain(|_, b| !b.full());
+                if st.bad_ips.len() > BAD_IPS_MAX {
+                    st.bad_ips.clear();
+                }
             }
             st.bad_ips
                 .entry(addr.ip())
