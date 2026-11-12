@@ -49,9 +49,14 @@ const TUNNEL_QUEUE_MAX: usize = 100;
 /// Volumen de la voz de grupo.
 const GROUP_GAIN: f32 = 0.85;
 /// Cuánto de la voz propia entra en la reverb.
-const SELF_ECHO_GAIN: f32 = 0.8;
-/// La voz propia solo entra en la reverb con `room` >= 0.2 (RT60 ~0.9 s), del todo a ~1.5 s.
-const SELF_ECHO_MIN_ROOM: f32 = 0.2;
+///
+/// Solo llega por la cola difusa, que es la parte floja de la reverb, así que para
+/// que se oiga por encima del juego tiene que entrar fuerte. Con esto, en una cueva
+/// de piedra corriente el eco queda unos 15 dB por debajo de tu voz.
+const SELF_ECHO_GAIN: f32 = 2.0;
+/// La voz propia solo entra en la reverb con `room` >= 0.14 (RT60 ~0.7 s), del todo
+/// a ~1.2 s, que es lo que mide un cuarto de piedra de 7x7.
+const SELF_ECHO_MIN_ROOM: f32 = 0.14;
 /// Energía máxima de las reflexiones tempranas sumadas, relativa a la voz (-6 dB).
 const MAX_EARLY_ENERGY: f32 = 0.25;
 /// Atenuación por cada esquina del camino (difracción).
@@ -1957,27 +1962,34 @@ mod tests {
         assert!(peak < 0.9, "satura: {peak}");
     }
 
+    /// Tiene que oírse en una cueva corriente, no solo en cavernas enormes: un cuarto
+    /// de piedra de 7x7 mide RT60 1.2 s, o sea `room` 0.3. Antes ahí quedaba a -30 dB,
+    /// que con el juego sonando es como no estar.
     #[test]
-    fn you_hear_your_own_echo_only_in_big_places() {
+    fn you_hear_your_own_echo_in_an_ordinary_cave() {
         let own_echo = |room: f32| {
             let c = local();
             c.set_noise_suppression(false);
             c.set_mode(TransmitMode::PushToTalk);
             c.set_push_to_talk(true);
-            c.set_acoustics(0.45, room, 0.3, vec![]);
+            c.set_acoustics(0.45, room, 0.21, vec![]);
             let mut out = vec![0f32; FRAME_SAMPLES * 2];
             let mut e = 0f32;
-            for n in 0..40 {
+            for n in 0..60 {
                 c.push_capture(&tone(FRAME_SAMPLES, 300.0 + n as f32));
                 c.render(&mut out);
                 e += energy(&out);
             }
-            e
+            e / 60.0
         };
-        let (tiny, cave) = (own_echo(0.14), own_echo(0.8));
-        println!("tu eco: cuarto pequeño {tiny:.2}, cueva grande {cave:.2}");
-        assert!(tiny < 0.01, "en un hueco pequeño no te oyes doble");
-        assert!(cave > 1.0, "en una cueva grande sí oyes tu eco");
+        let seca = energy(&tone(FRAME_SAMPLES, 300.0)) * 2.0;
+        let db = |room: f32| 10.0 * (own_echo(room) / seca).max(1e-12).log10();
+        let (hueco, cueva, caverna) = (db(0.1), db(0.3), db(0.8));
+        println!("tu eco: hueco {hueco:.1} dB, cueva {cueva:.1} dB, caverna {caverna:.1} dB");
+        assert!(hueco < -60.0, "en un hueco pequeño no te oyes doble: {hueco:.1} dB");
+        assert!(cueva > -16.0, "en una cueva corriente tiene que oírse: {cueva:.1} dB");
+        assert!(cueva < -6.0, "pero sin taparte el juego: {cueva:.1} dB");
+        assert!(caverna > cueva + 2.0, "y una caverna resuena bastante más: {caverna:.1} dB");
     }
 
     #[test]

@@ -5,6 +5,8 @@ sección de esa versión como notas de la release.
 
 ## [Sin publicar]
 
+- **Tu propio eco ya se oye en cuevas normales.** Solo sonaba en cavernas enormes: hacía falta un RT60 de 0,9 s para que empezara siquiera, y en un cuarto de piedra de 7x7 (RT60 1,2 s) quedaba a -30 dB respecto a tu voz, que con el juego sonando es como no estar. Ahora empieza a los 0,7 s y en esa misma cueva queda a -11 dB. En un hueco pequeño sigue sin sonar, y una caverna grande resuena bastante más.
+
 - **El eco se parece mucho más a una sala de verdad.** Seis cambios en la acústica:
   - **La cola ya no empieza encima de la voz**: arranca cuando vuelven las primeras reflexiones (pre-retardo de 5 a 80 ms, según lo lejos que estén las paredes). Es lo que hacía que una caverna sonara a efecto en vez de a sitio grande.
   - **Decae por bandas**: los graves duran hasta un 35 % más que la banda media y los agudos entre un 20 % y un 70 % menos, según el material. Antes todo el espectro se apagaba igual, y por eso la piedra no sonaba a piedra.
