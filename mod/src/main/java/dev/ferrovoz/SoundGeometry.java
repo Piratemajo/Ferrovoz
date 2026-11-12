@@ -50,6 +50,15 @@ public final class SoundGeometry {
     public static final double SPEED_OF_SOUND = 343.0;
     private static final int RAYS = 42;
     private static final int RAY_LENGTH = 32;
+    /**
+     * Hasta dónde se sigue buscando pared con paso basto cuando no hay nada en
+     * {@value #RAY_LENGTH} bloques.
+     *
+     * <p>Un rayo que no choca en 32 no está al aire libre necesariamente: en una
+     * caverna de pizarra profunda el techo puede estar a 40. Tomando eso por cielo
+     * abierto, la caverna se quedaba sin eco justo por ser grande.
+     */
+    private static final int FAR_LENGTH = 64;
     private static final int MAX_REFLECTIONS = 8;
     private static final int HEURISTIC_WEIGHT = 2;
     /** Separación mínima entre reflexiones tempranas (>= 3 ms). */
@@ -214,7 +223,7 @@ public final class SoundGeometry {
         for (int r = 0; r < RAYS; r++) {
             double[] d = dirs[r];
             hitDist[r] = -1;
-            for (double t = 0.5; t <= RAY_LENGTH; t += 0.5) {
+            for (double t = 0.5; t <= FAR_LENGTH; t += t < RAY_LENGTH ? 0.5 : 1.0) {
                 int bx = floor(x + d[0] * t), by = floor(y + d[1] * t), bz = floor(z + d[2] * t);
                 if (b.wall(bx, by, bz) >= 0.5f) {
                     hitDist[r] = t;
@@ -258,7 +267,10 @@ public final class SoundGeometry {
         double[] gain = new double[RAYS];
         for (int r = 0; r < RAYS; r++) {
             order[r] = r;
-            gain[r] = hitDist[r] >= 1.0 ? (1 - hitAlpha[r]) / (1 + hitDist[r] / 4.0) : 0;
+            // Solo las paredes cercanas dan primer eco: a más de 32 bloques el retardo
+            // (190 ms) se sale de la ventana y además no se midió con paso fino.
+            boolean cerca = hitDist[r] >= 1.0 && hitDist[r] <= RAY_LENGTH;
+            gain[r] = cerca ? (1 - hitAlpha[r]) / (1 + hitDist[r] / 4.0) : 0;
         }
         java.util.Arrays.sort(order, (p, q) -> Double.compare(gain[q], gain[p]));
         List<Integer> chosen = new ArrayList<>();
