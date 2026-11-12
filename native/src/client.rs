@@ -50,10 +50,11 @@ const TUNNEL_QUEUE_MAX: usize = 100;
 const GROUP_GAIN: f32 = 0.85;
 /// Cuánto de la voz propia entra en la reverb.
 ///
-/// Solo llega por la cola difusa, que es la parte floja de la reverb, así que para
-/// que se oiga por encima del juego tiene que entrar fuerte. Con esto, en una cueva
-/// de piedra corriente el eco queda unos 15 dB por debajo de tu voz.
-const SELF_ECHO_GAIN: f32 = 2.0;
+/// Solo llega por la cola difusa, que es la parte floja de la reverb. Probado en
+/// partida: a 2.0 retumba de más al hablar, así que se queda en 0.8. Lo que hace que
+/// ahora se oiga en una cueva normal no es esto, sino que la puerta de abajo
+/// (`SELF_ECHO_MIN_ROOM`) ya no se come las salas corrientes.
+const SELF_ECHO_GAIN: f32 = 0.8;
 /// La voz propia solo entra en la reverb con `room` >= 0.14 (RT60 ~0.7 s), del todo
 /// a ~1.2 s, que es lo que mide un cuarto de piedra de 7x7.
 const SELF_ECHO_MIN_ROOM: f32 = 0.14;
@@ -1987,8 +1988,10 @@ mod tests {
         let (hueco, cueva, caverna) = (db(0.1), db(0.3), db(0.8));
         println!("tu eco: hueco {hueco:.1} dB, cueva {cueva:.1} dB, caverna {caverna:.1} dB");
         assert!(hueco < -60.0, "en un hueco pequeño no te oyes doble: {hueco:.1} dB");
-        assert!(cueva > -16.0, "en una cueva corriente tiene que oírse: {cueva:.1} dB");
-        assert!(cueva < -6.0, "pero sin taparte el juego: {cueva:.1} dB");
+        // -19 dB probado en partida: se oye sin retumbar. A -30 no se oía y a -11
+        // molestaba al hablar.
+        assert!(cueva > -24.0, "en una cueva corriente tiene que oírse: {cueva:.1} dB");
+        assert!(cueva < -12.0, "pero sin taparte el juego: {cueva:.1} dB");
         assert!(caverna > cueva + 2.0, "y una caverna resuena bastante más: {caverna:.1} dB");
     }
 
