@@ -5,6 +5,8 @@ sección de esa versión como notas de la release.
 
 ## [Sin publicar]
 
+- **Arreglado: la acústica no se medía nunca.** Al añadir "remedir antes si el oyente se mueve", el contador de la última medida arrancaba en `Integer.MIN_VALUE`, y restarlo desbordaba el int: la cuenta salía negativa siempre, la condición no se cumplía nunca y el contador no se actualizaba jamás. Resultado: cero medidas por minuto, y con ellas ni reverb, ni reflexiones tempranas, ni eco propio, en ningún sitio. Ahora la primera medida se decide por si ya hay una hecha, no por el reloj.
+
 - **Las cavernas grandes ya suenan a cavernas.** Los rayos que miden la sala llegaban a 32 bloques, y uno que no chocaba con nada contaba como cielo abierto. En una caverna de pizarra profunda con el techo a 40 bloques eso significaba "estás a la intemperie": `wet` a cero y **ningún eco, justo por ser grande**. En una de 70x50 hasta el RT60 se desplomaba a 0,31 s, porque los rayos perdidos contaban como absorción total. Ahora, si no hay pared en 32 bloques, se sigue buscando con paso basto hasta 64: una caverna de 40x30 pasa de `wet` 0,000 a 0,450 y de RT60 3,50 s con la reverb apagada a 3,50 s sonando. Las salas pequeñas no cambian, y la llanura, el cañón, la boca de cueva y el cielo abierto siguen sin eco.
 
 - **Tu propio eco ya se oye en cuevas normales.** Solo sonaba en cavernas enormes: hacía falta un RT60 de 0,9 s para que empezara siquiera, y en un cuarto de piedra de 7x7 (RT60 1,2 s) quedaba a -30 dB respecto a tu voz, que con el juego sonando es como no estar. Ahora empieza a los 0,7 s y en esa misma cueva queda a -11 dB. En un hueco pequeño sigue sin sonar, y una caverna grande resuena bastante más.

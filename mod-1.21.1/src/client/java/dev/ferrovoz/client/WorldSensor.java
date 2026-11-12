@@ -47,9 +47,9 @@ final class WorldSensor {
     /** Hablantes tapados; se les busca camino por turnos, uno por tick. */
     private final List<UUID> occluded = new ArrayList<>();
     private int nextPath;
-    /** Dónde y cuándo se midió la sala la última vez. */
+    /** Dónde y cuándo se midió la sala la última vez; nulo hasta la primera. */
     private Vec3 lastMeasured;
-    private int lastMeasuredTick = Integer.MIN_VALUE;
+    private int lastMeasuredTick;
 
     /**
      * @param eye  posición de los oídos: el jugador, o la cámara en una repetición
@@ -63,8 +63,10 @@ final class WorldSensor {
 
         // Cada medio segundo, o antes si se ha movido: cruzar una puerta cambia la sala
         // y esperar al siguiente turno se nota.
+        // La primera se decide por {@code lastMeasured}, no por el reloj: restar un
+        // tick inicial de relleno desbordaría el int y no se mediría nunca.
         int since = ticks - lastMeasuredTick;
-        if (since >= ACOUSTICS_EVERY || (moved(eye) && since >= ACOUSTICS_MIN_EVERY)) {
+        if (lastMeasured == null || since >= ACOUSTICS_EVERY || (moved(eye) && since >= ACOUSTICS_MIN_EVERY)) {
             SoundGeometry.Acoustics a = SoundGeometry.measure(blocks, eye.x, eye.y, eye.z);
             FerrovozNative.clientSetAcoustics(handle, a.wet(), a.room(), a.damp(), a.reflections());
             lastMeasured = eye;
